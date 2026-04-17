@@ -1,0 +1,22 @@
+# Host artifacts — image builds its own node_modules and dist/
+node_modules
+**/node_modules
+**/dist
+
+.git
+.github
+.cursor
+.vscode
+*.log
+.env
+.env.*
+
+# Docs and tooling not needed at runtime in containers
+**/README.md
+docs
+scripts
+
+# Tests / coverage
+**/coverage
+**/*.test.ts
+**/*.spec.ts

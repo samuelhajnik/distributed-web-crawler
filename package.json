@@ -1,0 +1,27 @@
+{
+  "name": "distributed-web-crawler",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "test": "npm run test -w @crawler/shared",
+    "test:e2e": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts",
+    "test:e2e:generated": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts tests/e2e/generated-graph.test.ts",
+    "test:e2e:fixed": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts tests/e2e/fixed-fixtures.test.ts",
+    "compare-results": "tsx scripts/compare-results.ts",
+    "build": "npm run build --workspaces",
+    "dev:control-plane": "npm run dev -w control-plane",
+    "dev:worker": "npm run dev -w worker",
+    "start:control-plane": "npm run start -w control-plane",
+    "start:worker": "npm run start -w worker"
+  },
+  "devDependencies": {
+    "@crawler/shared": "workspace:*",
+    "cheerio": "^1.0.0",
+    "tsx": "^4.19.2",
+    "vitest": "^3.2.4"
+  }
+}

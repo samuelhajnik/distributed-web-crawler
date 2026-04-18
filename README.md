@@ -127,7 +127,7 @@ After each maintenance cycle: recover stale → reconcile → read counts → up
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/crawl-runs` | Start a crawl (JSON body **`{ "seedUrl": "<absolute http(s) URL>" }`** — required) |
+| `POST` | `/crawl-runs` | Start a crawl (JSON body with required `seedUrl` and optional per-run `settings`) |
 | `GET` | `/crawl-runs/:id` | Status + triggers one maintenance pass |
 | `GET` | `/crawl-runs/:id/summary` | Aggregates + run meta |
 | `GET` | `/crawl-runs/:id/urls` | Paginated URL rows (`status`, `limit`, `offset`, `sort`, `order`) |
@@ -141,10 +141,22 @@ After each maintenance cycle: recover stale → reconcile → read counts → up
 ```bash
 curl -sS -X POST http://localhost:3000/crawl-runs \
   -H "Content-Type: application/json" \
-  -d '{"seedUrl":"https://example.com/"}'
+  -d '{
+    "seedUrl":"https://example.com/",
+    "settings":{
+      "maxPages":300,
+      "maxDepth":4,
+      "scopeMode":"same_host",
+      "includeDocuments":false,
+      "followRedirects":true,
+      "demoDelayMs":0,
+      "requestTimeoutMs":5000,
+      "maxRetries":2
+    }
+  }'
 ```
 
-The response includes `id`, `seed_url`, `normalized_seed_url`, `allowed_hosts`, `root_url`, and `status`. `GET /crawl-runs/:id` and `GET /crawl-runs/:id/summary` echo the same scope fields from Postgres.
+The response includes `id`, `seed_url`, `normalized_seed_url`, `allowed_hosts`, `run_config`, `root_url`, and `status`. `GET /crawl-runs/:id` and `GET /crawl-runs/:id/summary` echo the same scope/config fields from Postgres.
 
 ### URL list pagination
 
@@ -242,16 +254,22 @@ Trade-off: real sites can change between runs; for demos, run back-to-back or us
 - Multi-worker exports can be compared to single-worker exports under the same fixture/rules.
 - Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient queue emptiness.
 
-## Demo UI (phase 2)
+## Demo UI (phase 2.5)
 
 A minimal observability UI is served by the control plane at `http://localhost:3000/ui/`.
 
-- Enter a `seedUrl` and click **Start Crawl**.
-- The page shows `crawl_run_id`, run status, summary counters, a live lineage graph, and a live URL table (`id`, `normalized_url`, `status`, `discovered_from_url_id`, `last_error`).
-- The graph uses lineage edges from `/crawl-runs/:id/graph` and node status metadata from `/crawl-runs/:id/urls`.
-- Phase 2 still uses polling (`/crawl-runs/:id/summary` + `/crawl-runs/:id/urls` + `/crawl-runs/:id/graph`) every ~1.5s and stops when the run reaches a terminal status.
+- Enter a `seedUrl`, adjust optional crawl settings, and click **Start Crawl**.
+- All views are **polling-driven**: the browser periodically requests JSON from the control plane and re-renders what the APIs return, so the UI reflects **backend state over time**; nothing is pushed live from the server.
+- **Run status and counters** come from `/crawl-runs/:id/summary` (~every **1.5s** while a run is active).
+- The **URL table** shares that poll loop and is **paginated**: **200** rows per page (`limit`/`offset` on `/crawl-runs/:id/urls`), with **Previous** / **Next** controls. Polling refreshes the **current page** without resetting to page 1. Columns include `id`, `normalized_url`, `status`, `depth`, `discovered_from_url_id`, `last_error`.
+- **Lineage graph** polling is **separate** and requests up to **50,000** URL rows from `/urls` plus a matching edge limit from `/graph`—far more than one table page—so the graph can represent the run much more completely than a single paginated screen.
+- **Graph refresh interval** is configurable in the UI (**1–10s**, default **3s**) via the slider next to the graph heading. That slider only changes how often the browser polls for graph data; it is not sent to the API or stored in `run_config`.
 
-This UI is intentionally lightweight and demo-focused. The polling transport is isolated so it can be replaced with SSE later without a large rewrite.
+Per-run settings from the UI/API are merged with **control-plane env defaults** for any omitted fields, then persisted on `crawl_runs.run_config` so each run records the crawl rules it used (`maxPages`, `maxDepth`, `scopeMode`, `includeDocuments`, `followRedirects`, `demoDelayMs`, `requestTimeoutMs`, `maxRetries`).
+
+**Concurrency is process-level, not per run.** BullMQ workers fetch jobs for arbitrary runs from one queue; outbound HTTP is gated inside each worker process. Tuning parallel work therefore uses **worker environment variables** (`WORKER_CONCURRENCY`, `FETCH_CONCURRENCY`, `FETCH_CONCURRENCY_PER_HOST`) at deploy time, not fields in `run_config`. That keeps the model honest: `run_config` only holds parameters the implementation actually applies per `crawl_run_id`.
+
+This UI remains intentionally lightweight and demo-focused. The polling transport is isolated so it can be replaced with SSE later without a large rewrite.
 
 If you want visuals in project docs later, add screenshots/GIFs under `docs/images/` and link them from this section.
 
@@ -308,6 +326,7 @@ docker compose up --scale worker=3 -d
 docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/001_p0_hardening.sql
 docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/002_p1_discovered_raw.sql
 docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/003_crawl_scope.sql
+docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/004_run_config_and_depth.sql
 ```
 
 Fresh volumes pick up `db/init.sql` automatically.
@@ -327,16 +346,21 @@ npm run dev:control-plane
 npm run dev:worker
 ```
 
-Worker metrics server listens on `WORKER_METRICS_PORT` (default `9091`).
+Worker metrics server listens on `WORKER_METRICS_PORT` (default `9091`). Parallel BullMQ jobs and outbound HTTP caps use `WORKER_CONCURRENCY` / `FETCH_CONCURRENCY` / `FETCH_CONCURRENCY_PER_HOST` — see **Fetch concurrency / politeness** for defaults (override via env before `npm run dev:worker`).
 
 ## Fetch concurrency / politeness (lightweight)
 
-Workers still use BullMQ `WORKER_CONCURRENCY` for **how many jobs run in parallel**, but outbound HTTP is additionally gated:
+Workers use three **independent** process-level knobs (set via environment when you start the worker binary; defaults are defined in `services/worker/src/concurrencyConfig.ts`):
 
-- `FETCH_CONCURRENCY` (default **4**): global in-process cap across concurrent jobs in one worker process.
-- `FETCH_CONCURRENCY_PER_HOST` (default **2**): per-host cap (hostname from URL).
+| Variable | Role | Default | Trade-off |
+|----------|------|---------|-----------|
+| `WORKER_CONCURRENCY` | BullMQ: how many URL jobs run concurrently in this process | **8** | More jobs in flight → faster frontier drain and more parallel DB/network work; too high can overload the worker or the origin. |
+| `FETCH_CONCURRENCY` | Global in-process cap on concurrent HTTP attempts (across those jobs) | **12** | Separates “queue concurrency” from “socket concurrency”; raises ceiling for link-rich pages without necessarily opening more TCP connections than this cap. |
+| `FETCH_CONCURRENCY_PER_HOST` | Per-hostname cap within this process | **6** | Reduces accidental burst load on a single origin; still not a distributed politeness layer. |
 
-This is **not** a full distributed politeness system (no shared global token bucket across all workers). For stronger production politeness you would add cross-process rate limits (often Redis) or crawl budgets.
+Together these defaults aim for **practical demo and dev throughput** while staying bounded—more responsive than ultra-conservative throttling, but not uncontrolled parallelism.
+
+This is **not** a full distributed politeness system (no shared global token bucket across all worker replicas). For stronger production politeness you would add cross-process rate limits (often Redis) or crawl budgets.
 
 ## Crawl lineage (graph)
 

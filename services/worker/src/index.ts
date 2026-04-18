@@ -3,15 +3,15 @@ import os from "node:os";
 import type { Job } from "bullmq";
 import { Worker } from "bullmq";
 import { load } from "cheerio";
-import { request } from "undici";
+import { fetch as undiciFetch, request } from "undici";
 import {
   CRAWL_QUEUE_NAME,
   CrawlJobPayload,
   classifyExecutionError,
   classifyHttpResponse,
+  DEFAULT_CRAWL_RUN_CONFIG,
+  type CrawlRunConfig,
   createCrawlQueue,
-  MAX_RETRIES,
-  normalizeUrl,
   pgPool,
   RETRY_429_MULTIPLIER,
   RETRY_BASE_DELAY_MS,
@@ -19,6 +19,12 @@ import {
   redisConnection
 } from "@crawler/shared";
 import type { FetchClassification } from "@crawler/shared";
+import {
+  DEFAULT_FETCH_CONCURRENCY,
+  DEFAULT_FETCH_PER_HOST_CONCURRENCY,
+  DEFAULT_WORKER_CONCURRENCY,
+  readWorkerEnvInt
+} from "./concurrencyConfig";
 import { createFetchGateway } from "./fetchLimit";
 import {
   crawlFetchDurationSeconds,
@@ -33,39 +39,113 @@ import {
   processedUrlsTotal
 } from "./prometheus";
 
-const workerConcurrency = Number(process.env.WORKER_CONCURRENCY ?? 5);
+const workerConcurrency = readWorkerEnvInt("WORKER_CONCURRENCY", DEFAULT_WORKER_CONCURRENCY);
+const fetchGlobalMax = readWorkerEnvInt("FETCH_CONCURRENCY", DEFAULT_FETCH_CONCURRENCY);
+const fetchPerHostMax = readWorkerEnvInt("FETCH_CONCURRENCY_PER_HOST", DEFAULT_FETCH_PER_HOST_CONCURRENCY);
 const workerId = process.env.WORKER_ID ?? `${os.hostname()}-${process.pid}`;
 const metricsPort = Number(process.env.WORKER_METRICS_PORT ?? 9091);
 const queue = createCrawlQueue();
 
-const runHostsCache = new Map<number, { hosts: Set<string>; until: number }>();
-const RUN_HOSTS_TTL_MS = 60_000;
+const runContextCache = new Map<number, { value: RunContext; until: number }>();
+const RUN_CONTEXT_TTL_MS = 60_000;
 
-async function getAllowedHostsForRun(crawlRunId: number): Promise<Set<string>> {
-  const now = Date.now();
-  const cached = runHostsCache.get(crawlRunId);
-  if (cached && cached.until > now) {
-    return cached.hosts;
+type RunContext = {
+  seedHost: string;
+  seedBaseDomain: string;
+  config: CrawlRunConfig;
+};
+
+function baseDomain(host: string): string {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === "localhost") {
+    return host;
   }
-  const res = await pgPool.query(`SELECT allowed_hosts FROM crawl_runs WHERE id = $1`, [crawlRunId]);
-  if (!res.rowCount) {
-    return new Set();
+  const parts = host.split(".").filter(Boolean);
+  if (parts.length < 2) {
+    return host;
   }
-  const hosts = new Set((res.rows[0].allowed_hosts as string[]).map((h) => String(h).toLowerCase()));
-  runHostsCache.set(crawlRunId, { hosts, until: now + RUN_HOSTS_TTL_MS });
-  return hosts;
+  return parts.slice(-2).join(".");
 }
 
-const fetchGateway = createFetchGateway(
-  Number(process.env.FETCH_CONCURRENCY ?? 4),
-  Number(process.env.FETCH_CONCURRENCY_PER_HOST ?? 2)
-);
+function isDocumentUrl(normalized: string): boolean {
+  try {
+    const p = new URL(normalized).pathname.toLowerCase();
+    return /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|zip|gz|tgz|rar|7z|tar|csv|xml|json)$/i.test(p);
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedByScope(host: string, ctx: RunContext): boolean {
+  const h = host.toLowerCase();
+  if (ctx.config.scopeMode === "same_domain") {
+    const b = baseDomain(h);
+    return b === ctx.seedBaseDomain;
+  }
+  return h === ctx.seedHost;
+}
+
+function normalizeCandidateUrl(baseUrl: string, rawHref: string, ctx: RunContext): string | null {
+  const href = rawHref.trim();
+  if (!href || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
+    return null;
+  }
+  let resolved: URL;
+  try {
+    resolved = new URL(href, baseUrl);
+  } catch {
+    return null;
+  }
+  if (!["http:", "https:"].includes(resolved.protocol)) {
+    return null;
+  }
+  if (!isAllowedByScope(resolved.hostname, ctx)) {
+    return null;
+  }
+  resolved.hash = "";
+  if ((resolved.protocol === "https:" && resolved.port === "443") || (resolved.protocol === "http:" && resolved.port === "80")) {
+    resolved.port = "";
+  }
+  return resolved.toString();
+}
+
+async function getRunContext(crawlRunId: number): Promise<RunContext> {
+  const now = Date.now();
+  const cached = runContextCache.get(crawlRunId);
+  if (cached && cached.until > now) {
+    return cached.value;
+  }
+  const res = await pgPool.query(`SELECT normalized_seed_url, run_config FROM crawl_runs WHERE id = $1`, [crawlRunId]);
+  if (!res.rowCount) {
+    const fallback: RunContext = {
+      seedHost: "",
+      seedBaseDomain: "",
+      config: { ...DEFAULT_CRAWL_RUN_CONFIG }
+    };
+    return fallback;
+  }
+  const row = res.rows[0] as { normalized_seed_url: string; run_config: Partial<CrawlRunConfig> | null };
+  const seed = new URL(row.normalized_seed_url);
+  const cfg = { ...DEFAULT_CRAWL_RUN_CONFIG, ...(row.run_config ?? {}) } as Record<string, unknown>;
+  delete cfg.workerConcurrency;
+  delete cfg.fetchConcurrency;
+  delete cfg.fetchPerHostConcurrency;
+  const ctx: RunContext = {
+    seedHost: seed.hostname.toLowerCase(),
+    seedBaseDomain: baseDomain(seed.hostname.toLowerCase()),
+    config: cfg as CrawlRunConfig
+  };
+  runContextCache.set(crawlRunId, { value: ctx, until: now + RUN_CONTEXT_TTL_MS });
+  return ctx;
+}
+
+const fetchGateway = createFetchGateway(fetchGlobalMax, fetchPerHostMax);
 
 type ClaimedUrl = {
   id: number;
   crawl_run_id: number;
   normalized_url: string;
   retry_count: number;
+  depth: number;
 };
 
 function logW(crawlRunId: number, urlId: number, msg: string): void {
@@ -82,7 +162,7 @@ async function claimUrl(urlId: number, crawlRunIdHint: number): Promise<ClaimedU
           claimed_by_worker = $2
       WHERE id = $1
         AND status = 'QUEUED'
-      RETURNING id, crawl_run_id, normalized_url, retry_count
+      RETURNING id, crawl_run_id, normalized_url, retry_count, depth
     `,
     [urlId, workerId]
   );
@@ -152,9 +232,10 @@ async function markFailedOrRetry(
   crawlRunId: number,
   urlId: number,
   retryCount: number,
-  classification: FetchClassification
+  classification: FetchClassification,
+  maxRetries: number
 ): Promise<void> {
-  const shouldRetry = classification.retryable && retryCount < MAX_RETRIES;
+  const shouldRetry = classification.retryable && retryCount < maxRetries;
   if (shouldRetry) {
     const backoffMultiplier = classification.backoffMultiplier ?? 1;
     const delay = getRetryDelayMs(retryCount, backoffMultiplier);
@@ -186,10 +267,11 @@ async function markFailedOrRetryFromError(
   crawlRunId: number,
   urlId: number,
   retryCount: number,
-  err: unknown
+  err: unknown,
+  maxRetries: number
 ): Promise<void> {
   const classification = classifyExecutionError(err);
-  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification);
+  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification, maxRetries);
 }
 
 async function markFailedOrRetryFromResponse(
@@ -197,13 +279,14 @@ async function markFailedOrRetryFromResponse(
   urlId: number,
   retryCount: number,
   statusCode: number,
-  contentType: string | null
+  contentType: string | null,
+  maxRetries: number
 ): Promise<void> {
   const classification = classifyHttpResponse(statusCode, contentType, RETRY_429_MULTIPLIER);
   if (classification.reason === "success") {
     return;
   }
-  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification);
+  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification, maxRetries);
 }
 
 async function markDiscoveredUrlsEnqueued(crawlRunId: number, insertedIds: { id: number }[]): Promise<void> {
@@ -221,24 +304,34 @@ async function markDiscoveredUrlsEnqueued(crawlRunId: number, insertedIds: { id:
 async function storeDiscoveredUrls(
   crawlRunId: number,
   pairs: { normalized: string; raw: string }[],
-  discoveredFromUrlId: number
+  discoveredFromUrlId: number,
+  discoveredDepth: number,
+  maxPages: number
 ): Promise<{ inserted: { id: number }[]; duplicatesSkipped: number }> {
   if (pairs.length === 0) {
     return { inserted: [], duplicatesSkipped: 0 };
   }
 
-  const norms = pairs.map((p) => p.normalized);
-  const raws = pairs.map((p) => p.raw);
+  const countRes = await pgPool.query(`SELECT COUNT(*)::int AS c FROM crawl_urls WHERE crawl_run_id = $1`, [crawlRunId]);
+  const existing = Number(countRes.rows[0]?.c ?? 0);
+  const remaining = Math.max(0, maxPages - existing);
+  if (remaining === 0) {
+    return { inserted: [], duplicatesSkipped: pairs.length };
+  }
+  const bounded = pairs.slice(0, remaining);
+
+  const norms = bounded.map((p) => p.normalized);
+  const raws = bounded.map((p) => p.raw);
 
   const insertRes = await pgPool.query(
     `
-      INSERT INTO crawl_urls (crawl_run_id, normalized_url, raw_url, discovered_from_url_id, status)
-      SELECT $1, t.norm, t.raw, $3, 'QUEUED'
+      INSERT INTO crawl_urls (crawl_run_id, normalized_url, raw_url, discovered_from_url_id, status, depth)
+      SELECT $1, t.norm, t.raw, $3, 'QUEUED', $5
       FROM UNNEST($2::text[], $4::text[]) AS t(norm, raw)
       ON CONFLICT (crawl_run_id, normalized_url) DO NOTHING
       RETURNING id
     `,
-    [crawlRunId, norms, discoveredFromUrlId, raws]
+    [crawlRunId, norms, discoveredFromUrlId, raws, discoveredDepth]
   );
 
   const insertedCount = insertRes.rowCount ?? 0;
@@ -263,7 +356,7 @@ async function storeDiscoveredUrls(
 function extractLinkPairs(
   baseUrl: string,
   html: string,
-  allowedHosts: ReadonlySet<string>
+  runContext: RunContext
 ): { normalized: string; raw: string }[] {
   const $ = load(html);
   const out: { normalized: string; raw: string }[] = [];
@@ -274,8 +367,11 @@ function extractLinkPairs(
       return;
     }
     const raw = href.trim();
-    const normalized = normalizeUrl(baseUrl, raw, allowedHosts);
+    const normalized = normalizeCandidateUrl(baseUrl, raw, runContext);
     if (normalized && !seen.has(normalized)) {
+      if (!runContext.config.includeDocuments && isDocumentUrl(normalized)) {
+        return;
+      }
       seen.add(normalized);
       out.push({ normalized, raw });
     }
@@ -295,22 +391,52 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
 
   const processingTimer = crawlProcessingDurationSeconds.startTimer();
   try {
+    const runContext = await getRunContext(claimed.crawl_run_id);
     logW(claimed.crawl_run_id, claimed.id, `fetch-start url=${claimed.normalized_url}`);
+    if (runContext.config.demoDelayMs > 0) {
+      await new Promise((r) => setTimeout(r, runContext.config.demoDelayMs));
+    }
 
+    const ac = new AbortController();
+    const timeoutHandle = setTimeout(() => ac.abort(), runContext.config.requestTimeoutMs);
     const fetchTimer = crawlFetchDurationSeconds.startTimer();
-    const response = await fetchGateway.run(claimed.normalized_url, () =>
-      request(claimed.normalized_url, {
-        method: "GET",
-        headers: {
-          "user-agent": "distributed-web-crawler/1.0"
-        }
-      })
-    );
+    let statusCode = 0;
+    let contentType: string | null = null;
+    let readBodyText: () => Promise<string> = async () => "";
+    try {
+      if (runContext.config.followRedirects) {
+        const response = await fetchGateway.run(claimed.normalized_url, () =>
+          undiciFetch(claimed.normalized_url, {
+            method: "GET",
+            headers: {
+              "user-agent": "distributed-web-crawler/1.0"
+            },
+            signal: ac.signal,
+            redirect: "follow"
+          })
+        );
+        statusCode = response.status;
+        contentType = response.headers.get("content-type");
+        readBodyText = () => response.text();
+      } else {
+        const response = await fetchGateway.run(claimed.normalized_url, () =>
+          request(claimed.normalized_url, {
+            method: "GET",
+            headers: {
+              "user-agent": "distributed-web-crawler/1.0"
+            },
+            signal: ac.signal
+          })
+        );
+        statusCode = response.statusCode;
+        const contentTypeHeader = response.headers["content-type"];
+        contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : null;
+        readBodyText = () => response.body.text();
+      }
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
     fetchTimer();
-
-    const statusCode = response.statusCode;
-    const contentTypeHeader = response.headers["content-type"];
-    const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : null;
     logW(
       claimed.crawl_run_id,
       claimed.id,
@@ -324,7 +450,8 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
         claimed.id,
         claimed.retry_count,
         statusCode,
-        contentType
+        contentType,
+        runContext.config.maxRetries
       );
       return;
     }
@@ -336,16 +463,27 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
 
     let html: string;
     try {
-      html = await response.body.text();
+      html = await readBodyText();
     } catch (err) {
-      await markFailedOrRetryFromError(claimed.crawl_run_id, claimed.id, claimed.retry_count, err);
+      await markFailedOrRetryFromError(
+        claimed.crawl_run_id,
+        claimed.id,
+        claimed.retry_count,
+        err,
+        runContext.config.maxRetries
+      );
       return;
     }
 
-    const allowedHosts = await getAllowedHostsForRun(claimed.crawl_run_id);
+    if (claimed.depth >= runContext.config.maxDepth) {
+      await markVisited(claimed.crawl_run_id, claimed.id, statusCode, contentType);
+      logW(claimed.crawl_run_id, claimed.id, "complete mode=max_depth");
+      return;
+    }
+
     let pairs: { normalized: string; raw: string }[];
     try {
-      pairs = extractLinkPairs(claimed.normalized_url, html, allowedHosts);
+      pairs = extractLinkPairs(claimed.normalized_url, html, runContext);
     } catch (err) {
       await markFailed(
         claimed.crawl_run_id,
@@ -357,7 +495,13 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
       return;
     }
 
-    const stored = await storeDiscoveredUrls(claimed.crawl_run_id, pairs, claimed.id);
+    const stored = await storeDiscoveredUrls(
+      claimed.crawl_run_id,
+      pairs,
+      claimed.id,
+      claimed.depth + 1,
+      runContext.config.maxPages
+    );
     await markDiscoveredUrlsEnqueued(claimed.crawl_run_id, stored.inserted);
     await markVisited(claimed.crawl_run_id, claimed.id, statusCode, contentType);
     logW(
@@ -366,7 +510,14 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
       `complete mode=html discovered=${pairs.length} inserted=${stored.inserted.length}`
     );
   } catch (err) {
-    await markFailedOrRetryFromError(claimed.crawl_run_id, claimed.id, claimed.retry_count, err);
+    const runContext = await getRunContext(claimed.crawl_run_id);
+    await markFailedOrRetryFromError(
+      claimed.crawl_run_id,
+      claimed.id,
+      claimed.retry_count,
+      err,
+      runContext.config.maxRetries
+    );
   } finally {
     processingTimer();
     processedUrlsTotal.inc();
@@ -406,7 +557,7 @@ http
   });
 
 process.stdout.write(
-  `[component=worker worker_id=${workerId}] started bullmq_concurrency=${workerConcurrency} fetch_concurrency=${process.env.FETCH_CONCURRENCY ?? 4} fetch_per_host=${process.env.FETCH_CONCURRENCY_PER_HOST ?? 2}\n`
+  `[component=worker worker_id=${workerId}] started bullmq_concurrency=${workerConcurrency} fetch_concurrency=${fetchGlobalMax} fetch_per_host=${fetchPerHostMax}\n`
 );
 
 process.on("SIGINT", async () => {

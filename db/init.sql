@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
   seed_url TEXT NOT NULL,
   normalized_seed_url TEXT NOT NULL,
   allowed_hosts TEXT[] NOT NULL,
+  run_config JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
   visited_count INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0,
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS crawl_urls (
   visited_at TIMESTAMPTZ,
   raw_url TEXT,
   discovered_from_url_id BIGINT REFERENCES crawl_urls(id),
+  depth INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (crawl_run_id, normalized_url)
@@ -38,6 +40,7 @@ ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS content_type TEXT;
 ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS visited_at TIMESTAMPTZ;
 ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS raw_url TEXT;
 ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS discovered_from_url_id BIGINT REFERENCES crawl_urls(id);
+ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS depth INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_crawl_urls_run_status ON crawl_urls(crawl_run_id, status);
 CREATE INDEX IF NOT EXISTS idx_crawl_urls_updated ON crawl_urls(updated_at);

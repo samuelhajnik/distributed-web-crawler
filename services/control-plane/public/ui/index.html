@@ -19,6 +19,28 @@
         <form id="start-form">
           <label for="seed-url">Seed URL</label>
           <input id="seed-url" name="seedUrl" type="url" required placeholder="https://example.com/" />
+          <label for="max-pages">Max pages</label>
+          <input id="max-pages" type="number" min="1" value="300" />
+          <label for="max-depth">Max depth</label>
+          <input id="max-depth" type="number" min="0" value="4" />
+          <label for="scope-mode">Scope</label>
+          <select id="scope-mode">
+            <option value="same_host" selected>same host only</option>
+            <option value="same_domain">same domain</option>
+          </select>
+          <label class="check"><input id="include-documents" type="checkbox" /> Include documents</label>
+          <label class="check"><input id="follow-redirects" type="checkbox" /> Follow redirects</label>
+          <label for="demo-delay-ms">Demo delay ms</label>
+          <input id="demo-delay-ms" type="number" min="0" value="0" />
+          <details class="advanced">
+            <summary>Advanced settings</summary>
+            <div class="advanced-grid">
+              <label for="request-timeout-ms">Request timeout ms</label>
+              <input id="request-timeout-ms" type="number" min="500" value="5000" />
+              <label for="max-retries">Max retries</label>
+              <input id="max-retries" type="number" min="0" value="2" />
+            </div>
+          </details>
           <button id="start-btn" type="submit">Start Crawl</button>
         </form>
         <p id="start-status" class="muted">No crawl started yet.</p>
@@ -35,18 +57,44 @@
           <div><span class="k">Failed</span><span id="c-failed">0</span></div>
           <div><span class="k">Discovered</span><span id="c-discovered">0</span></div>
         </div>
+        <div class="config-box">
+          <span class="k">Effective run config</span>
+          <pre id="run-config">{}</pre>
+        </div>
         <p id="poll-status" class="muted">Polling idle.</p>
       </section>
 
       <section class="panel">
-        <h2>Lineage Graph</h2>
+        <div class="graph-panel-head">
+          <h2>Lineage Graph</h2>
+          <div class="graph-refresh-control">
+            <label class="graph-refresh-label" for="graph-refresh-slider">
+              Graph refresh interval: <span id="graph-refresh-value">3s</span>
+            </label>
+            <input
+              id="graph-refresh-slider"
+              type="range"
+              min="1"
+              max="10"
+              step="1"
+              value="3"
+              aria-valuemin="1"
+              aria-valuemax="10"
+              aria-valuenow="3"
+              aria-label="Graph refresh interval in seconds"
+            />
+          </div>
+        </div>
         <p id="graph-status" class="muted">No active run yet.</p>
-        <div class="legend">
-          <span class="dot root"></span> Root
-          <span class="dot queued"></span> Queued
-          <span class="dot in-progress"></span> In progress
-          <span class="dot visited"></span> Visited
-          <span class="dot failed"></span> Failed
+        <div class="graph-legend" aria-label="Lineage graph node colors">
+          <span class="legend-row">
+            <span class="dot visited"></span> VISITED
+            <span class="dot queued"></span> QUEUED
+            <span class="dot in-progress"></span> IN_PROGRESS
+            <span class="dot redirect301"></span> HTTP 301 redirect
+            <span class="dot failed"></span> FAILED
+            <span class="dot root-ring"></span> Seed (purple outline)
+          </span>
         </div>
         <div id="graph-container"></div>
         <div id="graph-node-info" class="muted">Click a node to inspect details.</div>
@@ -54,6 +102,11 @@
 
       <section class="panel">
         <h2>URLs</h2>
+        <div class="urls-toolbar">
+          <button id="urls-prev" type="button" disabled>Previous</button>
+          <button id="urls-next" type="button" disabled>Next</button>
+          <span id="urls-page-status" class="muted urls-page-status" aria-live="polite"></span>
+        </div>
         <div id="urls-loading" class="muted">No data yet.</div>
         <div class="table-wrap">
           <table>
@@ -62,6 +115,7 @@
                 <th>ID</th>
                 <th>URL</th>
                 <th>Status</th>
+                <th>Depth</th>
                 <th>Discovered From</th>
                 <th>Last Error</th>
               </tr>

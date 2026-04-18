@@ -2,21 +2,54 @@ function normalizeStatus(status) {
   return String(status ?? "").toUpperCase();
 }
 
-function statusColor(status, isRoot) {
-  if (isRoot) {
-    return "#6d28d9";
-  }
-  const s = normalizeStatus(status);
+/**
+ * Vis fill colors — one semantic meaning each (matches graph legend).
+ * Borders for non-root nodes use borderDefault; root keeps a purple outline for the seed URL.
+ */
+export const GRAPH_NODE_PALETTE = {
+  visited: { bg: "#15803d", borderDefault: "#166534" },
+  queued: { bg: "#9ca3af", borderDefault: "#6b7280" },
+  inProgress: { bg: "#ea580c", borderDefault: "#c2410c" },
+  /** FAILED when worker classified redirect as unexpected (not the same as hard fetch failure). */
+  redirect301: { bg: "#2563eb", borderDefault: "#1d4ed8" },
+  failed: { bg: "#b91c1c", borderDefault: "#991b1b" }
+};
+
+function lastErrorText(row) {
+  return String(row?.last_error ?? "");
+}
+
+function isRedirect301Failure(row) {
+  return normalizeStatus(row.status) === "FAILED" && lastErrorText(row).includes("unexpected_http_301");
+}
+
+/**
+ * Maps a crawl_urls row to a palette key (failed split into redirect vs hard failure).
+ */
+export function classifyGraphNodeKind(row) {
+  const s = normalizeStatus(row?.status);
   if (s === "FAILED") {
-    return "#b91c1c";
+    return isRedirect301Failure(row) ? "redirect301" : "failed";
   }
   if (s === "VISITED" || s === "COMPLETED" || s === "SUCCEEDED") {
-    return "#15803d";
+    return "visited";
   }
   if (s === "IN_PROGRESS") {
-    return "#0369a1";
+    return "inProgress";
   }
-  return "#b45309";
+  if (s === "QUEUED") {
+    return "queued";
+  }
+  return "queued";
+}
+
+export function colorsForGraphNode(row, isRoot) {
+  const kind = classifyGraphNodeKind(row);
+  const p = GRAPH_NODE_PALETTE[kind];
+  return {
+    background: p.bg,
+    border: isRoot ? "#4c1d95" : p.borderDefault
+  };
 }
 
 /**
@@ -30,15 +63,15 @@ export function buildLineageGraph(urlsPayload, graphPayload) {
 
   const nodes = rows.map((r) => {
     const isRoot = r.discovered_from_url_id == null;
-    const color = statusColor(r.status, isRoot);
+    const { background, border } = colorsForGraphNode(r, isRoot);
     return {
       id: Number(r.id),
       label: String(r.id),
       shape: "dot",
       size: isRoot ? 13 : 9,
       color: {
-        background: color,
-        border: isRoot ? "#4c1d95" : "#333333"
+        background,
+        border
       },
       font: { color: "#111", size: 11 },
       title: formatNodeInfo(r),
@@ -58,8 +91,8 @@ export function buildLineageGraph(urlsPayload, graphPayload) {
     nodes,
     edges,
     nodeMeta,
-    edgeCount: Number(graphPayload?.edge_count ?? 0),
-    nodeCount: Number(graphPayload?.node_count ?? rows.length)
+    edgeCount: edges.length,
+    nodeCount: nodes.length
   };
 }
 
@@ -71,6 +104,7 @@ export function formatNodeInfo(row) {
     `id: ${row.id}`,
     `url: ${row.normalized_url ?? ""}`,
     `status: ${row.status ?? ""}`,
+    `depth: ${row.depth ?? 0}`,
     `discovered_from_url_id: ${row.discovered_from_url_id ?? "-"}`,
     `last_error: ${row.last_error ?? "-"}`,
     `retry_count: ${row.retry_count ?? 0}`

@@ -20,7 +20,8 @@ const REDIS_HOST = process.env.REDIS_HOST ?? "localhost";
 const REDIS_PORT = Number(process.env.REDIS_PORT ?? 6379);
 
 export const MAX_RETRIES = Number(process.env.MAX_RETRIES ?? 2);
-export const CLAIM_STALE_SECONDS = Number(process.env.CLAIM_STALE_SECONDS ?? 120);
+// Seconds: lease expiry for IN_PROGRESS rows (demo default is aggressive so stuck work is reclaimed quickly).
+export const CLAIM_STALE_SECONDS = Number(process.env.CLAIM_STALE_SECONDS ?? 10);
 export const RECONCILE_INTERVAL_SECONDS = Number(process.env.RECONCILE_INTERVAL_SECONDS ?? 10);
 export const RECONCILE_BATCH_SIZE = Number(process.env.RECONCILE_BATCH_SIZE ?? 500);
 export const RETRY_BASE_DELAY_MS = Number(process.env.RETRY_BASE_DELAY_MS ?? 1000);
@@ -48,6 +49,8 @@ export function createCrawlQueue(): Queue<CrawlJobPayload> {
 
 export type { FetchClassification } from "./classification";
 export { classifyExecutionError, classifyHttpResponse } from "./classification";
+export type { CrawlRunConfig, ScopeMode } from "./crawlConfig";
+export { clampInt, DEFAULT_CRAWL_RUN_CONFIG } from "./crawlConfig";
 export { buildAllowedHostSet, normalizeAbsoluteUrl, normalizeUrl, parseSeedUrl } from "./url";
 export { buildCrawlBulkJobs } from "./reconciliation";
 export type { CrawlBulkJob } from "./reconciliation";

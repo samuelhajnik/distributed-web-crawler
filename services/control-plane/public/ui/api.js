@@ -8,11 +8,11 @@ async function readJsonOrThrow(resp, context) {
   return resp.json();
 }
 
-export async function startCrawl(seedUrl) {
+export async function startCrawl(seedUrl, settings) {
   const resp = await fetch("/crawl-runs", {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ seedUrl })
+    body: JSON.stringify({ seedUrl, settings })
   });
   return readJsonOrThrow(resp, "start crawl");
 }
@@ -22,8 +22,11 @@ export async function getSummary(crawlRunId) {
   return readJsonOrThrow(resp, "summary");
 }
 
-export async function getUrls(crawlRunId, limit = 200) {
-  const resp = await fetch(`/crawl-runs/${crawlRunId}/urls?limit=${limit}&sort=id&order=asc`);
+export async function getUrls(crawlRunId, limit = 200, offset = 0) {
+  const o = Math.max(0, Number(offset) || 0);
+  const resp = await fetch(
+    `/crawl-runs/${crawlRunId}/urls?limit=${limit}&offset=${o}&sort=id&order=asc`
+  );
   return readJsonOrThrow(resp, "urls");
 }
 

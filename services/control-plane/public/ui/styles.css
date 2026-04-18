@@ -35,7 +35,41 @@ button {
 }
 
 input {
-  min-width: 360px;
+  min-width: 140px;
+}
+
+#seed-url {
+  min-width: 320px;
+}
+
+select {
+  font: inherit;
+  padding: 0.45rem 0.55rem;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.check input {
+  min-width: auto;
+}
+
+.advanced {
+  width: 100%;
+  border: 1px dashed #d8d8d8;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+
+.advanced-grid {
+  margin-top: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.45rem 0.7rem;
+  align-items: end;
 }
 
 button {
@@ -54,9 +88,72 @@ button {
   color: #555;
 }
 
+.config-box {
+  margin-top: 0.7rem;
+}
+
+#run-config {
+  margin: 0.35rem 0 0;
+  padding: 0.55rem;
+  background: #f7f7f7;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.urls-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  margin: 0 0 0.45rem;
+}
+
+.urls-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.urls-page-status {
+  font-size: 0.92rem;
+}
+
 .table-wrap {
   overflow: auto;
   max-height: 430px;
+}
+
+.graph-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.graph-panel-head h2 {
+  margin: 0;
+}
+
+.graph-refresh-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 220px;
+  flex: 1;
+  max-width: 320px;
+}
+
+.graph-refresh-label {
+  font-size: 0.88rem;
+  color: #444;
+}
+
+#graph-refresh-slider {
+  width: 100%;
+  min-width: 0;
 }
 
 #graph-container {
@@ -72,12 +169,16 @@ button {
   font-size: 0.9rem;
 }
 
-.legend {
-  font-size: 0.85rem;
+.graph-legend {
+  font-size: 0.82rem;
   color: #555;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.legend-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.7rem;
+  gap: 0.65rem 0.85rem;
   align-items: center;
 }
 
@@ -86,24 +187,30 @@ button {
   width: 0.65rem;
   height: 0.65rem;
   border-radius: 50%;
-  margin-right: 0.2rem;
+  margin-right: 0.15rem;
   vertical-align: middle;
+  border: 1px solid transparent;
 }
 
-.dot.root {
-  background: #6d28d9;
-}
-.dot.queued {
-  background: #b45309;
-}
-.dot.in-progress {
-  background: #0369a1;
-}
 .dot.visited {
   background: #15803d;
 }
+.dot.queued {
+  background: #9ca3af;
+}
+.dot.in-progress {
+  background: #ea580c;
+}
+.dot.redirect301 {
+  background: #2563eb;
+}
 .dot.failed {
   background: #b91c1c;
+}
+.dot.root-ring {
+  background: #e5e7eb;
+  border-color: #4c1d95;
+  border-width: 2px;
 }
 
 table {

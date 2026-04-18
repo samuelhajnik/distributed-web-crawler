@@ -1,6 +1,6 @@
 /**
  * Lightweight in-process concurrency gate for outbound fetches.
- * Global + per-host caps reduce accidental overload on the target site during local runs.
+ * Limits are wired from worker startup (see concurrencyConfig.ts / FETCH_* env vars).
  */
 export class AsyncSemaphore {
   private available: number;

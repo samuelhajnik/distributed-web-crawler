@@ -13,7 +13,7 @@ export const DEFAULT_WORKER_CONCURRENCY = 8;
 /** In-process cap on concurrent HTTP attempts across active BullMQ jobs. */
 export const DEFAULT_FETCH_CONCURRENCY = 12;
 /** Concurrent fetches to the same hostname from this process (Origin politeness). */
-export const DEFAULT_FETCH_PER_HOST_CONCURRENCY = 6;
+export const DEFAULT_FETCH_PER_HOST_CONCURRENCY = 4;
 
 export function readWorkerEnvInt(name: string, fallback: number, min = 1, max = 256): number {
   const raw = process.env[name];

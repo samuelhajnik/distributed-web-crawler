@@ -25,6 +25,10 @@ flowchart LR
 
 **Flow:** the control plane reads and updates Postgres, publishes jobs to Redis, and runs **reconciliation + lease-based stale recovery** so `QUEUED` rows are re-published and stale `IN_PROGRESS` rows can be reclaimed. Workers **consume Redis jobs, claim rows atomically in Postgres, fetch and parse, then write frontier updates back to Postgres**.
 
+![Demo UI — completed crawl](docs/screenshots/demo-ui-completed.png)
+
+*Completed crawl: final run counters and lineage graph.*
+
 ## What this repo demonstrates
 
 - Durable crawl frontier state in Postgres (`crawl_runs`, `crawl_urls`) with queryable run metadata.
@@ -34,14 +38,17 @@ flowchart LR
 - Lease-based recovery (`claimed_at`, `claimed_by_worker`) for stale in-flight work.
 - Completion is determined from frontier state (`QUEUED=0`, `IN_PROGRESS=0`) observed across consecutive maintenance cycles, rather than queue emptiness.
 
-## Scope and limitations
+## Reviewer path
 
-- This implementation is not a web-scale crawler and is intended for local/demo/review environments.
-- No JavaScript rendering pipeline; responses are fetched as HTTP documents and parsed with Cheerio.
-- No robots.txt / crawl-delay / advanced distributed politeness scheduler.
-- URL normalization is intentionally conservative and documented in this README.
-- Host scope is intentionally narrow per run (`seed host` plus optional `www` counterpart only).
-- Correctness properties are relative to the documented normalization and allowed-host rules.
+A quick path through the repo:
+
+1. Bring the stack up (`docker compose up --build`; see **Run with Docker Compose**).
+2. Start a crawl via the demo UI (`http://localhost:3000/ui/`), `POST /crawl-runs`, or `scripts/crawl-start.sh`.
+3. Inspect run state: `GET /crawl-runs/:id/summary`, the UI, or `scripts/crawl-summary.sh <id>`.
+4. Inspect URLs and lineage: **Demo UI**, `GET /crawl-runs/:id/urls`, `GET /crawl-runs/:id/graph`, or `/export`.
+5. (Optional) Scale workers and compare exports—**Single-worker vs multi-worker comparison**, `npm run compare-results`, **End-to-end correctness tests**.
+
+For design detail: [docs/architecture.md](docs/architecture.md). For metrics and failure modes: [docs/observability.md](docs/observability.md).
 
 ## Design choices in this implementation
 
@@ -67,6 +74,15 @@ These properties cover both safety (no concurrent duplicate row-level processing
 Reviewers can verify these properties using the export/summary APIs, the E2E fixture tests, and the comparison workflow (`npm run compare-results`).
 
 **Mechanisms reviewers can rely on:** DB uniqueness, **atomic claim**, **reconciliation loop**, **lease-based recovery**, and the **export comparison** workflow.
+
+## Scope and limitations
+
+- This implementation is not a web-scale crawler and is intended for local/demo/review environments.
+- No JavaScript rendering pipeline; responses are fetched as HTTP documents and parsed with Cheerio.
+- No robots.txt / crawl-delay / advanced distributed politeness scheduler.
+- URL normalization is intentionally conservative and documented in this README.
+- Host scope is intentionally narrow per run (`seed host` plus optional `www` counterpart only).
+- Correctness properties are relative to the documented normalization and allowed-host rules.
 
 ## Stack
 
@@ -122,6 +138,80 @@ After each maintenance cycle: recover stale → reconcile → read counts → up
 `crawl_runs` includes: `seed_url` (caller input), `normalized_seed_url`, `root_url` (canonical normalized seed, same value as `normalized_seed_url`), **`allowed_hosts`** (text array used for link filtering), plus status and counters.
 
 `crawl_urls` includes: `normalized_url`, optional `raw_url` (href as seen), optional `discovered_from_url_id`, lease fields, HTTP metadata, retries, timestamps.
+
+## Demo UI
+
+The control plane serves a minimal browser UI at `http://localhost:3000/ui/`. It is intentionally **polling-based** (no server push): the client periodically fetches JSON and re-renders **run summary**, an interactive **lineage graph**, and a **paginated URL table** for inspection.
+
+![Before run](docs/screenshots/demo-ui-before-run.png)
+
+*Before run — Configure a crawl from the demo UI.*
+
+![Running](docs/screenshots/demo-ui-running.png)
+
+*Running — Live polling updates run state and lineage graph during execution.*
+
+![Node detail](docs/screenshots/demo-ui-node-detail.png)
+
+*Node detail — Click a node to inspect URL metadata and terminal outcome.*
+
+![URL table](docs/screenshots/demo-ui-urls-table.png)
+
+*URL table — Paginated URL rows with status, depth, parent, and error details.*
+
+**Behavior notes:** **Run status and counters** come from `/crawl-runs/:id/summary` (~every **1.5s** while a run is active). The **URL table** uses the same loop with **200** rows per page (`limit`/`offset`), **Previous** / **Next**, and refreshes the current page without jumping to page 1. **Lineage graph** polling is separate and loads up to **50,000** URL rows from `/urls` plus a matching `/graph` edge limit. **Graph refresh interval** is configurable in the UI (**1–10s**, default **3s**); it only affects browser polling, not `run_config`.
+
+Per-run settings from the UI/API are merged with **control-plane env defaults** for any omitted fields, then persisted on `crawl_runs.run_config` (`maxPages`, `maxDepth`, `scopeMode`, `includeDocuments`, `followRedirects`, `demoDelayMs`, `requestTimeoutMs`, `maxRetries`).
+
+**Concurrency is process-level, not per run.** Workers use **environment variables** (`WORKER_CONCURRENCY`, `FETCH_CONCURRENCY`, `FETCH_CONCURRENCY_PER_HOST`) at deploy time, not `run_config`.
+
+This UI remains lightweight and demo-focused; the polling layer can be swapped for SSE later without a large rewrite.
+
+## What reviewers can verify
+
+- Duplicate queue delivery does not create duplicate URL rows because dedup + atomic claim gates processing.
+- Stale `IN_PROGRESS` work can be reclaimed through lease expiry and maintenance.
+- `QUEUED` rows missing from Redis are re-enqueued by reconciliation.
+- Multi-worker exports can be compared to single-worker exports under the same fixture/rules.
+- Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient queue emptiness.
+
+## Tests
+
+```bash
+npm install
+npm test
+```
+
+Vitest tests live in `packages/shared` for:
+
+- **normalization + host filtering** (`url.ts`, no DB side effects)
+- **retry / HTTP classification** (`classification.ts`)
+- **reconciliation job builder** (`reconciliation.ts`)
+- **Postgres semantics** for dedup + atomic claim using **in-memory `pg-mem`** (`dbConcurrency.pgmem.test.ts`)
+
+## End-to-end correctness tests
+
+These tests drive the **real control-plane API** against **local static HTML fixtures** served from the host, so expected URL sets and status totals are **known exactly** (unlike live sites, which drift and hide edge cases).
+
+- **Fixed fixtures** (`tests/e2e/fixed-fixtures.test.ts`) — small hand-written graphs: single page, duplicate + fragment + external link, broken link (404), cycle, and an optional **www / host-scope** case (`E2E_WWW=1`).
+- **Seeded graphs** (`tests/e2e/generated-graph.test.ts`) — deterministic random HTML graphs (default seeds `42424` and `91817`; page count `E2E_GRAPH_PAGES`, default 11). On failure the run prints `TEST_GRAPH_SEED` so you can rerun with the same value.
+- **Worker equivalence** — `scripts/e2e-worker-equivalence.sh` rescales Compose workers, runs two exports of the same fixture, and runs `npm run compare-results`. Alternatively, set `E2E_EXPORT_A` and `E2E_EXPORT_B` to two export JSON paths and run `vitest run --config vitest.e2e.config.ts tests/e2e/worker-equivalence-exports.test.ts`.
+
+**Prerequisites:** `docker compose up --build -d` (control plane + Postgres + Redis + **worker**). The worker image includes `extra_hosts: host.docker.internal:host-gateway` so it can fetch fixtures; the harness serves on `0.0.0.0` and uses seed URLs like `http://host.docker.internal:<port>/…` (override with `E2E_FIXTURE_HOST=127.0.0.1` if both the API and the worker run on the host, not in Docker).
+
+```bash
+npm install
+npm run build -w @crawler/shared   # tests import @crawler/shared
+npm run test:e2e                   # all E2E (fixed + generated + skipped export compare)
+npm run test:e2e:fixed
+npm run test:e2e:generated
+```
+
+**Rerun one failing generated case:**
+
+```bash
+TEST_GRAPH_SEED=91817 npm run test:e2e:generated
+```
 
 ## API reference (inspection)
 
@@ -195,7 +285,7 @@ Full narrative + failure-mode table: **[docs/observability.md](docs/observabilit
 ### What the key metrics mean
 
 | Metric | What it measures |
-|--------|-------------------|
+|--------|------------------|
 | `crawl_fetch_duration_seconds` (worker histogram) | Time from starting the gated HTTP request until response headers are available. |
 | `crawl_processing_duration_seconds` (worker histogram) | Wall time **after a successful claim** for the whole job (body read, parse, DB writes, enqueue children). |
 | `crawl_queue_latency_seconds` (worker histogram) | `now - job.timestamp` when the job starts—queueing + scheduling delay before your worker thread picks it up. |
@@ -246,71 +336,6 @@ Goal: show the **normalized URL set** is the same under the same rules.
 
 Trade-off: real sites can change between runs; for demos, run back-to-back or use a fixed snapshot environment.
 
-## What reviewers can verify
-
-- Duplicate queue delivery does not create duplicate URL rows because dedup + atomic claim gates processing.
-- Stale `IN_PROGRESS` work can be reclaimed through lease expiry and maintenance.
-- `QUEUED` rows missing from Redis are re-enqueued by reconciliation.
-- Multi-worker exports can be compared to single-worker exports under the same fixture/rules.
-- Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient queue emptiness.
-
-## Demo UI (phase 2.5)
-
-A minimal observability UI is served by the control plane at `http://localhost:3000/ui/`.
-
-- Enter a `seedUrl`, adjust optional crawl settings, and click **Start Crawl**.
-- All views are **polling-driven**: the browser periodically requests JSON from the control plane and re-renders what the APIs return, so the UI reflects **backend state over time**; nothing is pushed live from the server.
-- **Run status and counters** come from `/crawl-runs/:id/summary` (~every **1.5s** while a run is active).
-- The **URL table** shares that poll loop and is **paginated**: **200** rows per page (`limit`/`offset` on `/crawl-runs/:id/urls`), with **Previous** / **Next** controls. Polling refreshes the **current page** without resetting to page 1. Columns include `id`, `normalized_url`, `status`, `depth`, `discovered_from_url_id`, `last_error`.
-- **Lineage graph** polling is **separate** and requests up to **50,000** URL rows from `/urls` plus a matching edge limit from `/graph`—far more than one table page—so the graph can represent the run much more completely than a single paginated screen.
-- **Graph refresh interval** is configurable in the UI (**1–10s**, default **3s**) via the slider next to the graph heading. That slider only changes how often the browser polls for graph data; it is not sent to the API or stored in `run_config`.
-
-Per-run settings from the UI/API are merged with **control-plane env defaults** for any omitted fields, then persisted on `crawl_runs.run_config` so each run records the crawl rules it used (`maxPages`, `maxDepth`, `scopeMode`, `includeDocuments`, `followRedirects`, `demoDelayMs`, `requestTimeoutMs`, `maxRetries`).
-
-**Concurrency is process-level, not per run.** BullMQ workers fetch jobs for arbitrary runs from one queue; outbound HTTP is gated inside each worker process. Tuning parallel work therefore uses **worker environment variables** (`WORKER_CONCURRENCY`, `FETCH_CONCURRENCY`, `FETCH_CONCURRENCY_PER_HOST`) at deploy time, not fields in `run_config`. That keeps the model honest: `run_config` only holds parameters the implementation actually applies per `crawl_run_id`.
-
-This UI remains intentionally lightweight and demo-focused. The polling transport is isolated so it can be replaced with SSE later without a large rewrite.
-
-If you want visuals in project docs later, add screenshots/GIFs under `docs/images/` and link them from this section.
-
-## Tests
-
-```bash
-npm install
-npm test
-```
-
-Vitest tests live in `packages/shared` for:
-
-- **normalization + host filtering** (`url.ts`, no DB side effects)
-- **retry / HTTP classification** (`classification.ts`)
-- **reconciliation job builder** (`reconciliation.ts`)
-- **Postgres semantics** for dedup + atomic claim using **in-memory `pg-mem`** (`dbConcurrency.pgmem.test.ts`)
-
-## End-to-end correctness tests
-
-These tests drive the **real control-plane API** against **local static HTML fixtures** served from the host, so expected URL sets and status totals are **known exactly** (unlike live sites, which drift and hide edge cases).
-
-- **Fixed fixtures** (`tests/e2e/fixed-fixtures.test.ts`) — small hand-written graphs: single page, duplicate + fragment + external link, broken link (404), cycle, and an optional **www / host-scope** case (`E2E_WWW=1`).
-- **Seeded graphs** (`tests/e2e/generated-graph.test.ts`) — deterministic random HTML graphs (default seeds `42424` and `91817`; page count `E2E_GRAPH_PAGES`, default 11). On failure the run prints `TEST_GRAPH_SEED` so you can rerun with the same value.
-- **Worker equivalence** — `scripts/e2e-worker-equivalence.sh` rescales Compose workers, runs two exports of the same fixture, and runs `npm run compare-results`. Alternatively, set `E2E_EXPORT_A` and `E2E_EXPORT_B` to two export JSON paths and run `vitest run --config vitest.e2e.config.ts tests/e2e/worker-equivalence-exports.test.ts`.
-
-**Prerequisites:** `docker compose up --build -d` (control plane + Postgres + Redis + **worker**). The worker image includes `extra_hosts: host.docker.internal:host-gateway` so it can fetch fixtures; the harness serves on `0.0.0.0` and uses seed URLs like `http://host.docker.internal:<port>/…` (override with `E2E_FIXTURE_HOST=127.0.0.1` if both the API and the worker run on the host, not in Docker).
-
-```bash
-npm install
-npm run build -w @crawler/shared   # tests import @crawler/shared
-npm run test:e2e                   # all E2E (fixed + generated + skipped export compare)
-npm run test:e2e:fixed
-npm run test:e2e:generated
-```
-
-**Rerun one failing generated case:**
-
-```bash
-TEST_GRAPH_SEED=91817 npm run test:e2e:generated
-```
-
 ## Run with Docker Compose
 
 Images compile TypeScript during `docker compose build` (`npm ci` + workspace `tsc`); you do **not** need a host-built `dist/` before starting containers. Runtime entrypoints are `node services/control-plane/dist/index.js` and `node services/worker/dist/index.js`.
@@ -356,7 +381,7 @@ Workers use three **independent** process-level knobs (set via environment when 
 |----------|------|---------|-----------|
 | `WORKER_CONCURRENCY` | BullMQ: how many URL jobs run concurrently in this process | **8** | More jobs in flight → faster frontier drain and more parallel DB/network work; too high can overload the worker or the origin. |
 | `FETCH_CONCURRENCY` | Global in-process cap on concurrent HTTP attempts (across those jobs) | **12** | Separates “queue concurrency” from “socket concurrency”; raises ceiling for link-rich pages without necessarily opening more TCP connections than this cap. |
-| `FETCH_CONCURRENCY_PER_HOST` | Per-hostname cap within this process | **6** | Reduces accidental burst load on a single origin; still not a distributed politeness layer. |
+| `FETCH_CONCURRENCY_PER_HOST` | Per-hostname cap within this process | **4** | Reduces accidental burst load on a single origin; still not a distributed politeness layer. |
 
 Together these defaults aim for **practical demo and dev throughput** while staying bounded—more responsive than ultra-conservative throttling, but not uncontrolled parallelism.
 

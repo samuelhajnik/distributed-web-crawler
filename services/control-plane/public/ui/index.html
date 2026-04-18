@@ -3,121 +3,170 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Distributed Crawler Demo UI</title>
+    <title>Distributed Crawler — Demo UI</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
   </head>
   <body>
     <main class="app">
-      <header>
-        <h1>Distributed Crawler Demo UI</h1>
-        <p class="muted">Phase 2 (polling): start a crawl and watch summary, lineage graph, and URL rows update.</p>
+      <header class="app-header">
+        <h1>Distributed Crawler</h1>
+        <p class="muted app-tagline">Demo UI — polling summary, lineage graph, and URL list.</p>
       </header>
 
-      <section class="panel">
-        <h2>Start Crawl</h2>
-        <form id="start-form">
-          <label for="seed-url">Seed URL</label>
-          <input id="seed-url" name="seedUrl" type="url" required placeholder="https://example.com/" />
-          <label for="max-pages">Max pages</label>
-          <input id="max-pages" type="number" min="1" value="300" />
-          <label for="max-depth">Max depth</label>
-          <input id="max-depth" type="number" min="0" value="4" />
-          <label for="scope-mode">Scope</label>
-          <select id="scope-mode">
-            <option value="same_host" selected>same host only</option>
-            <option value="same_domain">same domain</option>
-          </select>
-          <label class="check"><input id="include-documents" type="checkbox" /> Include documents</label>
-          <label class="check"><input id="follow-redirects" type="checkbox" /> Follow redirects</label>
-          <label for="demo-delay-ms">Demo delay ms</label>
-          <input id="demo-delay-ms" type="number" min="0" value="0" />
+      <section class="panel panel--start">
+        <h2 class="panel-heading">Start Crawl</h2>
+        <form id="start-form" class="start-form">
+          <div class="start-field start-field--full">
+            <label for="seed-url">Seed URL</label>
+            <input id="seed-url" name="seedUrl" type="url" required placeholder="https://example.com/" />
+          </div>
+          <div class="start-grid">
+            <div class="start-field">
+              <label for="max-pages">Max pages</label>
+              <input id="max-pages" type="number" min="1" value="300" />
+            </div>
+            <div class="start-field">
+              <label for="max-depth">Max depth</label>
+              <input id="max-depth" type="number" min="0" value="4" />
+            </div>
+            <div class="start-field">
+              <label for="scope-mode">Scope</label>
+              <select id="scope-mode">
+                <option value="same_host" selected>Same host only</option>
+                <option value="same_domain">Same domain</option>
+              </select>
+            </div>
+          </div>
+          <div class="start-row-checks">
+            <label class="check"><input id="include-documents" type="checkbox" /> Include documents</label>
+            <label class="check"><input id="follow-redirects" type="checkbox" /> Follow redirects</label>
+          </div>
+          <div class="start-field start-field--secondary">
+            <label for="demo-delay-ms">Demo delay (ms)</label>
+            <input id="demo-delay-ms" type="number" min="0" value="0" title="Extra delay between jobs for demos" />
+          </div>
           <details class="advanced">
             <summary>Advanced settings</summary>
             <div class="advanced-grid">
-              <label for="request-timeout-ms">Request timeout ms</label>
-              <input id="request-timeout-ms" type="number" min="500" value="5000" />
-              <label for="max-retries">Max retries</label>
-              <input id="max-retries" type="number" min="0" value="2" />
+              <div class="start-field">
+                <label for="request-timeout-ms">Request timeout (ms)</label>
+                <input id="request-timeout-ms" type="number" min="500" value="5000" />
+              </div>
+              <div class="start-field">
+                <label for="max-retries">Max retries</label>
+                <input id="max-retries" type="number" min="0" value="2" />
+              </div>
             </div>
           </details>
-          <button id="start-btn" type="submit">Start Crawl</button>
+          <div class="start-actions">
+            <button id="start-btn" type="submit">Start crawl</button>
+          </div>
         </form>
-        <p id="start-status" class="muted">No crawl started yet.</p>
+        <p id="start-status" class="start-status muted">No crawl started yet.</p>
       </section>
 
       <section class="panel">
-        <h2>Run State</h2>
-        <div class="grid">
-          <div><span class="k">Run ID</span><span id="run-id">-</span></div>
-          <div><span class="k">Status</span><span id="run-status">-</span></div>
-          <div><span class="k">Queued</span><span id="c-queued">0</span></div>
-          <div><span class="k">In progress</span><span id="c-in-progress">0</span></div>
-          <div><span class="k">Visited</span><span id="c-visited">0</span></div>
-          <div><span class="k">Failed</span><span id="c-failed">0</span></div>
-          <div><span class="k">Discovered</span><span id="c-discovered">0</span></div>
+        <h2 class="panel-heading">Run State</h2>
+        <div class="stats-grid">
+          <article class="stat-card">
+            <span class="stat-label">Run ID</span>
+            <span id="run-id" class="stat-value stat-value--mono">—</span>
+          </article>
+          <article class="stat-card stat-card--status">
+            <span class="stat-label">Status</span>
+            <span id="run-status" class="stat-value stat-status stat-status--neutral">—</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Queued</span>
+            <span id="c-queued" class="stat-value">0</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">In progress</span>
+            <span id="c-in-progress" class="stat-value">0</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Visited</span>
+            <span id="c-visited" class="stat-value">0</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Failed</span>
+            <span id="c-failed" class="stat-value">0</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Discovered</span>
+            <span id="c-discovered" class="stat-value">0</span>
+          </article>
         </div>
-        <div class="config-box">
-          <span class="k">Effective run config</span>
-          <pre id="run-config">{}</pre>
-        </div>
-        <p id="poll-status" class="muted">Polling idle.</p>
+        <details class="run-config-details">
+          <summary class="run-config-summary">Effective run config</summary>
+          <pre id="run-config" class="run-config-pre">{}</pre>
+        </details>
+        <p id="poll-status" class="poll-status muted">Polling idle.</p>
       </section>
 
-      <section class="panel">
-        <div class="graph-panel-head">
-          <h2>Lineage Graph</h2>
-          <div class="graph-refresh-control">
-            <label class="graph-refresh-label" for="graph-refresh-slider">
-              Graph refresh interval: <span id="graph-refresh-value">3s</span>
-            </label>
-            <input
-              id="graph-refresh-slider"
-              type="range"
-              min="1"
-              max="10"
-              step="1"
-              value="3"
-              aria-valuemin="1"
-              aria-valuemax="10"
-              aria-valuenow="3"
-              aria-label="Graph refresh interval in seconds"
-            />
+      <section class="panel panel--graph">
+        <div class="panel-toolbar">
+          <div class="panel-toolbar-left">
+            <h2 class="panel-toolbar-title">Lineage graph</h2>
+            <span id="graph-meta" class="panel-meta" aria-live="polite">—</span>
+            <span id="graph-warn" class="panel-meta panel-meta--warn" aria-live="polite"></span>
+          </div>
+          <div class="panel-toolbar-right graph-controls">
+            <div class="graph-refresh-control">
+              <label class="graph-refresh-label" for="graph-refresh-slider">
+                Refresh <span id="graph-refresh-value">3s</span>
+              </label>
+              <input
+                id="graph-refresh-slider"
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                value="3"
+                aria-valuemin="1"
+                aria-valuemax="10"
+                aria-valuenow="3"
+                aria-label="Graph refresh interval in seconds"
+              />
+            </div>
+            <button id="graph-fit-btn" type="button" class="btn-secondary graph-fit-btn">Fit graph</button>
           </div>
         </div>
-        <p id="graph-status" class="muted">No active run yet.</p>
-        <div class="graph-legend" aria-label="Lineage graph node colors">
-          <span class="legend-row">
-            <span class="dot visited"></span> VISITED
-            <span class="dot queued"></span> QUEUED
-            <span class="dot in-progress"></span> IN_PROGRESS
-            <span class="dot redirect301"></span> HTTP 301 redirect
-            <span class="dot failed"></span> FAILED
-            <span class="dot root-ring"></span> Seed (purple outline)
-          </span>
+        <div class="graph-legend" aria-label="Lineage graph legend">
+          <span class="legend-chip"><span class="dot visited"></span> Visited</span>
+          <span class="legend-chip"><span class="dot queued"></span> Queued</span>
+          <span class="legend-chip"><span class="dot in-progress"></span> In progress</span>
+          <span class="legend-chip"><span class="dot redirect301"></span> 301 redirect</span>
+          <span class="legend-chip"><span class="dot failed"></span> Failed</span>
+          <span class="legend-chip"><span class="dot root-ring"></span> Seed</span>
         </div>
-        <div id="graph-container"></div>
-        <div id="graph-node-info" class="muted">Click a node to inspect details.</div>
+        <div id="graph-container" class="graph-canvas"></div>
+        <div id="graph-node-info" class="graph-node-detail muted">Click a node for details.</div>
       </section>
 
       <section class="panel">
-        <h2>URLs</h2>
-        <div class="urls-toolbar">
-          <button id="urls-prev" type="button" disabled>Previous</button>
-          <button id="urls-next" type="button" disabled>Next</button>
-          <span id="urls-page-status" class="muted urls-page-status" aria-live="polite"></span>
+        <div class="panel-toolbar panel-toolbar--urls">
+          <div class="panel-toolbar-left">
+            <h2 class="panel-toolbar-title">URLs</h2>
+          </div>
+          <div class="panel-toolbar-right urls-toolbar">
+            <span id="urls-page-status" class="urls-page-status muted" aria-live="polite"></span>
+            <button id="urls-prev" type="button" class="btn-secondary" disabled>Previous</button>
+            <button id="urls-next" type="button" class="btn-secondary" disabled>Next</button>
+          </div>
         </div>
-        <div id="urls-loading" class="muted">No data yet.</div>
+        <div id="urls-loading" class="urls-loading muted">No data yet.</div>
         <div class="table-wrap">
-          <table>
+          <table class="urls-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>URL</th>
-                <th>Status</th>
-                <th>Depth</th>
-                <th>Discovered From</th>
-                <th>Last Error</th>
+                <th class="col-id">ID</th>
+                <th class="col-url">URL</th>
+                <th class="col-status">Status</th>
+                <th class="col-depth">Depth</th>
+                <th class="col-parent">From</th>
+                <th class="col-error">Last error</th>
               </tr>
             </thead>
             <tbody id="urls-body"></tbody>

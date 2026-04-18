@@ -1,7 +1,11 @@
 /**
  * Thin vis-network wrapper; rendering stays isolated from fetch/poll logic.
  */
-export function createLineageGraphView(containerEl, infoEl) {
+export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
+  const { onUserViewportInteraction } = hooks;
+  let suppressViewportInteraction = false;
+  let fitSoonTimer = null;
+
   // vis-network UMD global loaded from CDN in index.html
   const visNetwork = window.vis;
   const data = {
@@ -26,9 +30,6 @@ export function createLineageGraphView(containerEl, infoEl) {
     }
   );
 
-  /** True until the first post-clear render has registered a one-shot freeze after stabilization. */
-  let pendingPhysicsFreeze = true;
-
   function syncDataSet(dataSet, nextItems) {
     const nextIds = new Set(nextItems.map((item) => String(item.id)));
     const existingIds = dataSet.getIds();
@@ -52,26 +53,75 @@ export function createLineageGraphView(containerEl, infoEl) {
     infoEl.textContent = node.title ?? "No node metadata";
   });
 
+  function notifyViewportInteraction() {
+    if (suppressViewportInteraction) {
+      return;
+    }
+    onUserViewportInteraction?.();
+  }
+
+  network.on("dragEnd", notifyViewportInteraction);
+  network.on("zoom", notifyViewportInteraction);
+
+  /**
+   * Fit viewport to all nodes; modest animation. Suppresses viewport “interaction” callbacks during programmatic fit.
+   */
+  function fit(options = {}) {
+    const duration = options.duration ?? 320;
+    const easingFunction = options.easingFunction ?? "easeInOutQuad";
+    suppressViewportInteraction = true;
+    network.fit({
+      animation: {
+        duration,
+        easingFunction
+      }
+    });
+    setTimeout(() => {
+      suppressViewportInteraction = false;
+    }, duration + 100);
+  }
+
+  /**
+   * Debounced fit after a short delay so physics can spread new nodes; repeated calls reset the timer.
+   */
+  function fitSoon(options = {}) {
+    const { delayMs = 350, ...fitOpts } = options;
+    if (fitSoonTimer !== null) {
+      clearTimeout(fitSoonTimer);
+    }
+    fitSoonTimer = setTimeout(() => {
+      fitSoonTimer = null;
+      fit(fitOpts);
+    }, delayMs);
+  }
+
+  function getCounts() {
+    return {
+      nodeCount: data.nodes.getIds().length,
+      edgeCount: data.edges.getIds().length
+    };
+  }
+
   function render(model) {
     syncDataSet(data.nodes, model.nodes);
     syncDataSet(data.edges, model.edges);
 
-    if (model.nodes.length > 0 && pendingPhysicsFreeze) {
-      pendingPhysicsFreeze = false;
-      network.setOptions({ physics: physicsOptions });
-      network.once("stabilizationIterationsDone", () => {
-        network.setOptions({ physics: false });
-      });
-    }
+    return {
+      nodeCount: model.nodes.length,
+      edgeCount: model.edges.length
+    };
   }
 
   function clear(message) {
-    pendingPhysicsFreeze = true;
+    if (fitSoonTimer !== null) {
+      clearTimeout(fitSoonTimer);
+      fitSoonTimer = null;
+    }
     data.nodes.clear();
     data.edges.clear();
     network.setOptions({ physics: physicsOptions });
     infoEl.textContent = message ?? "No node selected";
   }
 
-  return { render, clear };
+  return { render, clear, fit, fitSoon, getCounts };
 }

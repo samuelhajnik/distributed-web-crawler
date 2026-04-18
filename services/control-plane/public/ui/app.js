@@ -24,7 +24,8 @@ const el = {
   failed: document.getElementById("c-failed"),
   discovered: document.getElementById("c-discovered"),
   pollStatus: document.getElementById("poll-status"),
-  graphStatus: document.getElementById("graph-status"),
+  graphMeta: document.getElementById("graph-meta"),
+  graphWarn: document.getElementById("graph-warn"),
   graphContainer: document.getElementById("graph-container"),
   graphNodeInfo: document.getElementById("graph-node-info"),
   runConfig: document.getElementById("run-config"),
@@ -32,6 +33,7 @@ const el = {
   urlsLoading: document.getElementById("urls-loading"),
   graphRefreshSlider: document.getElementById("graph-refresh-slider"),
   graphRefreshValue: document.getElementById("graph-refresh-value"),
+  graphFitBtn: document.getElementById("graph-fit-btn"),
   urlsPrev: document.getElementById("urls-prev"),
   urlsNext: document.getElementById("urls-next"),
   urlsPageStatus: document.getElementById("urls-page-status")
@@ -47,7 +49,17 @@ let urlsTableOffset = 0;
 const URL_TABLE_LIMIT = 200;
 /** Rows/edges fetched for lineage graph construction (aligned with GET /graph limit). */
 const GRAPH_URL_LIMIT = 50000;
-const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo);
+
+/** Auto-fit viewport on growth until the user pans/zooms; “Fit graph” re-enables. */
+let graphAutoFitEnabled = true;
+let lastRenderedGraphNodeCount = 0;
+let lastRenderedGraphEdgeCount = 0;
+
+const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo, {
+  onUserViewportInteraction: () => {
+    graphAutoFitEnabled = false;
+  }
+});
 
 /** Deterministic snapshot of UI-relevant graph content for comparing polls. */
 function buildGraphSignature(model) {
@@ -88,14 +100,59 @@ function syncGraphRefreshLabel() {
   el.graphRefreshSlider.setAttribute("aria-valuenow", String(sec));
 }
 
+function formatRunStatusLabel(status) {
+  const u = String(status ?? "").toUpperCase();
+  const labels = {
+    RUNNING: "Running",
+    COMPLETED: "Completed",
+    FAILED: "Failed",
+    QUEUED: "Queued",
+    PENDING: "Pending"
+  };
+  if (!u) {
+    return "—";
+  }
+  return labels[u] ?? String(status);
+}
+
+function runStatusVariant(status) {
+  const u = String(status ?? "").toUpperCase();
+  if (u === "RUNNING") {
+    return "running";
+  }
+  if (u === "COMPLETED") {
+    return "completed";
+  }
+  if (u === "FAILED") {
+    return "failed";
+  }
+  return "neutral";
+}
+
+function formatUrlStatus(status) {
+  const u = String(status ?? "").toUpperCase();
+  const labels = {
+    QUEUED: "Queued",
+    IN_PROGRESS: "In progress",
+    VISITED: "Visited",
+    FAILED: "Failed"
+  };
+  if (labels[u]) {
+    return labels[u];
+  }
+  return escapeHtml(status ?? "");
+}
+
 function setPollStatus(msg, isError = false) {
   el.pollStatus.textContent = msg;
   el.pollStatus.className = isError ? "err" : "muted";
 }
 
 function renderSummary(summary) {
-  el.runId.textContent = String(summary?.crawl_run_id ?? activeRunId ?? "-");
-  el.runStatus.textContent = summary?.status ?? "-";
+  el.runId.textContent = String(summary?.crawl_run_id ?? activeRunId ?? "—");
+  const st = summary?.status;
+  el.runStatus.textContent = formatRunStatusLabel(st);
+  el.runStatus.className = `stat-value stat-status stat-status--${runStatusVariant(st)}`;
   const totals = summary?.totals ?? {};
   el.queued.textContent = String(totals.queued ?? 0);
   el.inProgress.textContent = String(totals.in_progress ?? 0);
@@ -141,12 +198,12 @@ function renderUrls(rows, pagination) {
   el.urlsBody.innerHTML = rows
     .map(
       (r) => `<tr>
-      <td>${r.id ?? ""}</td>
-      <td class="url">${escapeHtml(r.normalized_url ?? "")}</td>
-      <td>${escapeHtml(r.status ?? "")}</td>
-      <td>${r.depth ?? 0}</td>
-      <td>${r.discovered_from_url_id ?? ""}</td>
-      <td>${escapeHtml(r.last_error ?? "")}</td>
+      <td class="col-id">${r.id ?? ""}</td>
+      <td class="url col-url">${escapeHtml(r.normalized_url ?? "")}</td>
+      <td class="col-status"><span class="cell-status">${formatUrlStatus(r.status)}</span></td>
+      <td class="col-depth">${r.depth ?? 0}</td>
+      <td class="col-parent">${r.discovered_from_url_id ?? ""}</td>
+      <td class="col-error cell-error-text">${escapeHtml(r.last_error ?? "")}</td>
     </tr>`
     )
     .join("");
@@ -161,29 +218,43 @@ function escapeHtml(text) {
 }
 
 function renderGraph(snapshot) {
-  const errSuffix = snapshot.graphError ? ` • graph endpoint degraded: ${snapshot.graphError}` : "";
-
   if (!activeRunId) {
     lastGraphSignature = null;
-    el.graphStatus.textContent = "No active run yet.";
-    graphView.clear("No node selected");
+    lastRenderedGraphNodeCount = 0;
+    lastRenderedGraphEdgeCount = 0;
+    el.graphMeta.textContent = "No active crawl.";
+    el.graphWarn.textContent = "";
+    graphView.clear("Click a node for details.");
     return;
   }
   const urlsRows = snapshot.urls?.urls ?? [];
   if (!urlsRows.length) {
     lastGraphSignature = null;
-    el.graphStatus.textContent = `Run exists but no URLs discovered yet.${errSuffix}`;
-    graphView.clear("No node selected");
+    lastRenderedGraphNodeCount = 0;
+    lastRenderedGraphEdgeCount = 0;
+    el.graphMeta.textContent = "No URLs yet.";
+    el.graphWarn.textContent = snapshot.graphError ? String(snapshot.graphError) : "";
+    graphView.clear("Click a node for details.");
     return;
   }
 
   const model = buildLineageGraph(snapshot.urls, snapshot.graph);
-  el.graphStatus.textContent = `Nodes: ${model.nodeCount} • Edges: ${model.edgeCount}${errSuffix}`;
+  el.graphMeta.textContent = `${model.nodeCount.toLocaleString()} nodes · ${model.edgeCount.toLocaleString()} edges`;
+  el.graphWarn.textContent = snapshot.graphError ? `Incomplete graph data: ${snapshot.graphError}` : "";
 
   const signature = buildGraphSignature(model);
   if (signature !== lastGraphSignature) {
     graphView.render(model);
     lastGraphSignature = signature;
+
+    const grew =
+      model.nodeCount > lastRenderedGraphNodeCount || model.edgeCount > lastRenderedGraphEdgeCount;
+    if (graphAutoFitEnabled && grew) {
+      graphView.fitSoon({ delayMs: 350 });
+    }
+
+    lastRenderedGraphNodeCount = model.nodeCount;
+    lastRenderedGraphEdgeCount = model.edgeCount;
   }
 
   if (!el.graphNodeInfo.textContent || el.graphNodeInfo.textContent.includes("Click a node")) {
@@ -234,7 +305,7 @@ const graphPoller = createRunPoller(
     renderGraph(snap);
   },
   (err) => {
-    el.graphStatus.textContent = `Graph update failed: ${err?.message ?? String(err)}`;
+    el.graphWarn.textContent = `Graph poll failed: ${err?.message ?? String(err)}`;
   },
   DEFAULT_GRAPH_REFRESH_SEC * 1000
 );
@@ -246,7 +317,7 @@ const poller = createRunPoller(
   },
   (err) => {
     setPollStatus(`Polling error: ${err?.message ?? String(err)}`, true);
-    el.graphStatus.textContent = `Update failed: ${err?.message ?? String(err)}`;
+    el.graphWarn.textContent = `Run poll failed: ${err?.message ?? String(err)}`;
   },
   MAIN_POLL_MS
 );
@@ -256,6 +327,11 @@ el.graphRefreshSlider.addEventListener("input", () => {
   graphPoller.setPollInterval(Number(el.graphRefreshSlider.value) * 1000);
 });
 syncGraphRefreshLabel();
+
+el.graphFitBtn.addEventListener("click", () => {
+  graphAutoFitEnabled = true;
+  graphView.fit();
+});
 
 el.urlsPrev.addEventListener("click", () => {
   if (!activeRunId || urlsTableOffset <= 0) {
@@ -296,17 +372,21 @@ el.form.addEventListener("submit", async (ev) => {
   try {
     const run = await startCrawl(seedUrl, settings);
     lastGraphSignature = null;
+    graphAutoFitEnabled = true;
+    lastRenderedGraphNodeCount = 0;
+    lastRenderedGraphEdgeCount = 0;
     urlsTableOffset = 0;
     activeRunId = Number(run.id);
     el.urlsPageStatus.textContent = "";
     el.urlsPrev.disabled = true;
     el.urlsNext.disabled = true;
-    graphView.clear("Click a node to inspect details.");
+    graphView.clear("Click a node for details.");
     el.startStatus.textContent = `Crawl started (run ${activeRunId}).`;
     el.startStatus.className = "ok";
     el.urlsLoading.textContent = "Loading URLs...";
-    el.graphStatus.textContent = "Loading lineage graph...";
-    el.graphNodeInfo.textContent = "Click a node to inspect details.";
+    el.graphMeta.textContent = "Loading…";
+    el.graphWarn.textContent = "";
+    el.graphNodeInfo.textContent = "Click a node for details.";
     el.runConfig.textContent = JSON.stringify(run.run_config ?? settings, null, 2);
     poller.start(activeRunId);
     graphPoller.start(activeRunId);

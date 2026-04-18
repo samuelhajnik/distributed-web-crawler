@@ -242,6 +242,19 @@ Trade-off: real sites can change between runs; for demos, run back-to-back or us
 - Multi-worker exports can be compared to single-worker exports under the same fixture/rules.
 - Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient queue emptiness.
 
+## Demo UI (phase 2)
+
+A minimal observability UI is served by the control plane at `http://localhost:3000/ui/`.
+
+- Enter a `seedUrl` and click **Start Crawl**.
+- The page shows `crawl_run_id`, run status, summary counters, a live lineage graph, and a live URL table (`id`, `normalized_url`, `status`, `discovered_from_url_id`, `last_error`).
+- The graph uses lineage edges from `/crawl-runs/:id/graph` and node status metadata from `/crawl-runs/:id/urls`.
+- Phase 2 still uses polling (`/crawl-runs/:id/summary` + `/crawl-runs/:id/urls` + `/crawl-runs/:id/graph`) every ~1.5s and stops when the run reaches a terminal status.
+
+This UI is intentionally lightweight and demo-focused. The polling transport is isolated so it can be replaced with SSE later without a large rewrite.
+
+If you want visuals in project docs later, add screenshots/GIFs under `docs/images/` and link them from this section.
+
 ## Tests
 
 ```bash

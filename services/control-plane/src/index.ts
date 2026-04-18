@@ -1,4 +1,5 @@
 import express from "express";
+import path from "node:path";
 import {
   buildCrawlBulkJobs,
   CLAIM_STALE_SECONDS,
@@ -38,6 +39,8 @@ type CompletionStability = {
 const port = Number(process.env.CONTROL_PLANE_PORT ?? 3000);
 const app = express();
 app.use(express.json());
+const uiDir = path.resolve(__dirname, "../public/ui");
+app.use("/ui", express.static(uiDir));
 
 const queue = createCrawlQueue();
 const completionState = new Map<number, CompletionStability>();

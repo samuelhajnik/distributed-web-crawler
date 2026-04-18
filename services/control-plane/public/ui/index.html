@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Distributed Crawler Demo UI</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>Distributed Crawler Demo UI</h1>
+        <p class="muted">Phase 2 (polling): start a crawl and watch summary, lineage graph, and URL rows update.</p>
+      </header>
+
+      <section class="panel">
+        <h2>Start Crawl</h2>
+        <form id="start-form">
+          <label for="seed-url">Seed URL</label>
+          <input id="seed-url" name="seedUrl" type="url" required placeholder="https://example.com/" />
+          <button id="start-btn" type="submit">Start Crawl</button>
+        </form>
+        <p id="start-status" class="muted">No crawl started yet.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Run State</h2>
+        <div class="grid">
+          <div><span class="k">Run ID</span><span id="run-id">-</span></div>
+          <div><span class="k">Status</span><span id="run-status">-</span></div>
+          <div><span class="k">Queued</span><span id="c-queued">0</span></div>
+          <div><span class="k">In progress</span><span id="c-in-progress">0</span></div>
+          <div><span class="k">Visited</span><span id="c-visited">0</span></div>
+          <div><span class="k">Failed</span><span id="c-failed">0</span></div>
+          <div><span class="k">Discovered</span><span id="c-discovered">0</span></div>
+        </div>
+        <p id="poll-status" class="muted">Polling idle.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Lineage Graph</h2>
+        <p id="graph-status" class="muted">No active run yet.</p>
+        <div class="legend">
+          <span class="dot root"></span> Root
+          <span class="dot queued"></span> Queued
+          <span class="dot in-progress"></span> In progress
+          <span class="dot visited"></span> Visited
+          <span class="dot failed"></span> Failed
+        </div>
+        <div id="graph-container"></div>
+        <div id="graph-node-info" class="muted">Click a node to inspect details.</div>
+      </section>
+
+      <section class="panel">
+        <h2>URLs</h2>
+        <div id="urls-loading" class="muted">No data yet.</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>URL</th>
+                <th>Status</th>
+                <th>Discovered From</th>
+                <th>Last Error</th>
+              </tr>
+            </thead>
+            <tbody id="urls-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

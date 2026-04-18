@@ -1,0 +1,134 @@
+.app {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  max-width: 1100px;
+  margin: 1.5rem auto;
+  padding: 0 1rem 2rem;
+}
+
+h1,
+h2 {
+  margin: 0 0 0.5rem;
+}
+
+.panel {
+  border: 1px solid #d8d8d8;
+  border-radius: 8px;
+  padding: 0.9rem;
+  margin-top: 1rem;
+}
+
+.muted {
+  color: #666;
+}
+
+form {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+input,
+button {
+  font: inherit;
+  padding: 0.45rem 0.55rem;
+}
+
+input {
+  min-width: 360px;
+}
+
+button {
+  cursor: pointer;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.5rem;
+}
+
+.k {
+  display: block;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: 430px;
+}
+
+#graph-container {
+  margin-top: 0.6rem;
+  border: 1px solid #ececec;
+  border-radius: 6px;
+  height: 420px;
+  background: #fafafa;
+}
+
+#graph-node-info {
+  margin-top: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.legend {
+  font-size: 0.85rem;
+  color: #555;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.dot {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  margin-right: 0.2rem;
+  vertical-align: middle;
+}
+
+.dot.root {
+  background: #6d28d9;
+}
+.dot.queued {
+  background: #b45309;
+}
+.dot.in-progress {
+  background: #0369a1;
+}
+.dot.visited {
+  background: #15803d;
+}
+.dot.failed {
+  background: #b91c1c;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+th,
+td {
+  border-bottom: 1px solid #ececec;
+  text-align: left;
+  vertical-align: top;
+  padding: 0.45rem;
+}
+
+td.url {
+  max-width: 460px;
+  word-break: break-all;
+}
+
+.ok {
+  color: #196127;
+}
+
+.err {
+  color: #8f1111;
+}

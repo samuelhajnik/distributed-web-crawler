@@ -12,7 +12,9 @@ import {
   DEFAULT_CRAWL_RUN_CONFIG,
   type CrawlRunConfig,
   createCrawlQueue,
+  mergeRetryAfterWithBackoff,
   pgPool,
+  parseRetryAfterMs,
   RETRY_BASE_DELAY_MS,
   RETRY_MAX_DELAY_MS,
   redisConnection
@@ -64,6 +66,15 @@ function buildRequestHeaders(): Record<string, string> {
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "accept-language": "en-US,en;q=0.9"
   };
+}
+
+/** Undici `request()` uses Node header objects; normalize `Retry-After` for parsing. */
+function retryAfterFromUndiciHeaders(headers: Record<string, string | string[] | undefined>): string | null {
+  const raw = headers["retry-after"] ?? headers["Retry-After"];
+  if (raw == null) {
+    return null;
+  }
+  return Array.isArray(raw) ? raw[0] ?? null : raw;
 }
 
 const runContextCache = new Map<number, { value: RunContext; until: number }>();
@@ -283,12 +294,17 @@ async function markFailedOrRetry(
   urlId: number,
   retryCount: number,
   classification: FetchClassification,
-  maxRetries: number
+  maxRetries: number,
+  retryAfterMs?: number | null
 ): Promise<void> {
   const shouldRetry = classification.retryable && retryCount < maxRetries;
   if (shouldRetry) {
     const backoffMultiplier = classification.backoffMultiplier ?? 1;
-    const delay = getRetryDelayMs(retryCount, backoffMultiplier);
+    const baseDelay = getRetryDelayMs(retryCount, backoffMultiplier);
+    const delay =
+      classification.httpStatus === 429
+        ? mergeRetryAfterWithBackoff(baseDelay, retryAfterMs, RETRY_MAX_DELAY_MS)
+        : baseDelay;
     await pgPool.query(
       `
         UPDATE crawl_urls
@@ -337,7 +353,7 @@ async function markFailedOrRetryFromError(
   maxRetries: number
 ): Promise<void> {
   const classification = classifyExecutionError(err);
-  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification, maxRetries);
+  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification, maxRetries, null);
 }
 
 async function markFailedOrRetryFromResponse(
@@ -346,13 +362,16 @@ async function markFailedOrRetryFromResponse(
   retryCount: number,
   statusCode: number,
   contentType: string | null,
-  maxRetries: number
+  maxRetries: number,
+  retryAfterHeader?: string | null
 ): Promise<void> {
   const classification = classifyHttpResponse(statusCode, contentType);
   if (classification.reason === "success") {
     return;
   }
-  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification, maxRetries);
+  const retryAfterMs =
+    statusCode === 429 ? parseRetryAfterMs(retryAfterHeader ?? null, Date.now()) : null;
+  await markFailedOrRetry(crawlRunId, urlId, retryCount, classification, maxRetries, retryAfterMs);
 }
 
 async function markDiscoveredUrlsEnqueued(crawlRunId: number, insertedIds: { id: number }[]): Promise<void> {
@@ -473,6 +492,7 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
     const fetchTimer = crawlFetchDurationSeconds.startTimer();
     let statusCode = 0;
     let contentType: string | null = null;
+    let retryAfterHeader: string | null = null;
     let readBodyText: () => Promise<string> = async () => "";
     try {
       if (runContext.config.followRedirects) {
@@ -486,6 +506,7 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
         );
         statusCode = response.status;
         contentType = response.headers.get("content-type");
+        retryAfterHeader = response.headers.get("retry-after");
         readBodyText = () => response.text();
       } else {
         const response = await fetchGateway.run(claimed.normalized_url, () =>
@@ -498,6 +519,7 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
         statusCode = response.statusCode;
         const contentTypeHeader = response.headers["content-type"];
         contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : null;
+        retryAfterHeader = retryAfterFromUndiciHeaders(response.headers);
         readBodyText = () => response.body.text();
       }
     } finally {
@@ -521,7 +543,8 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
         claimed.retry_count,
         statusCode,
         contentType,
-        runContext.config.maxRetries
+        runContext.config.maxRetries,
+        retryAfterHeader
       );
       return;
     }

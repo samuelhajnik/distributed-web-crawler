@@ -133,7 +133,7 @@ HTTP outcomes are classified in `packages/shared` (`classifyHttpResponse`); tran
 - **403**: terminal `FORBIDDEN` (request completed; access denied by target).
 - **404**: terminal `NOT_FOUND`.
 - **5xx**: classified **retryable**; the URL is re-queued with backoff until **`maxRetries`** is exhausted, then terminal **`HTTP_TERMINAL`**.
-- **429** (rate limit): terminal **`HTTP_TERMINAL`** and **not** URL-retried (`retryable: false` in classification). The worker may still apply **process-local host cooldown** after a 429 (see **Fetch concurrency / politeness**).
+- **408**, **421**, **425**, **429**: classified **retryable** like **5xx**; the URL is re-queued with backoff until **`maxRetries`** is exhausted, then terminal **`HTTP_TERMINAL`** with the recorded HTTP status. For **429** only, when the response includes a valid **`Retry-After`** header (seconds or HTTP-date), the BullMQ job delay uses the **greater** of normal backoff and that hint, capped by **`RETRY_MAX_DELAY_MS`**; invalid or missing **`Retry-After`** falls back to backoff only. **Process-local host cooldown** still applies after a **429** (see **Fetch concurrency / politeness**).
 - **Other 3xx/4xx** not listed above (e.g. **401**, **410**): terminal **`HTTP_TERMINAL`**; **not** URL-retried.
 - **Crawler-side failures** (no completed HTTP response, transport/DNS, runtime/parser errors): terminal **`FAILED`** when retries are exhausted; cases classified **retryable** (including many network/timeout errors and **AbortController** request-timeout aborts when classified as retryable) are re-queued until **`maxRetries`** is exhausted.
 

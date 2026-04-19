@@ -52,10 +52,22 @@ describe("classifyHttpResponse", () => {
     expect(r.terminalStatus).toBe("REDIRECT_301");
   });
 
-  it("maps 429 to terminal rate limit (non-retryable)", () => {
+  it("maps 429 to retryable rate limit with HTTP_TERMINAL bucket for exhausted retries", () => {
     const r = classifyHttpResponse(429, null);
-    expect(r.retryable).toBe(false);
-    expect(r.reason).toBe("terminal_http_429");
+    expect(r.retryable).toBe(true);
+    expect(r.reason).toBe("retryable_http_429");
+    expect(r.terminalStatus).toBe("HTTP_TERMINAL");
+  });
+
+  it.each([
+    [408, "retryable_http_408"],
+    [421, "retryable_http_421"],
+    [425, "retryable_http_425"]
+  ] as const)("treats %i as retryable transient HTTP with HTTP_TERMINAL after exhausted retries", (code, reason) => {
+    const r = classifyHttpResponse(code, null);
+    expect(r.retryable).toBe(true);
+    expect(r.reason).toBe(reason);
+    expect(r.httpStatus).toBe(code);
     expect(r.terminalStatus).toBe("HTTP_TERMINAL");
   });
 });

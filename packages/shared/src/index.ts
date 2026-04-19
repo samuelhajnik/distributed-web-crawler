@@ -56,6 +56,7 @@ export function createCrawlQueue(): Queue<CrawlJobPayload> {
 
 export type { FetchClassification } from "./classification";
 export { classifyExecutionError, classifyHttpResponse } from "./classification";
+export { mergeRetryAfterWithBackoff, parseRetryAfterMs } from "./retryAfter";
 export type { CrawlRunConfig, ScopeMode } from "./crawlConfig";
 export { clampInt, DEFAULT_CRAWL_RUN_CONFIG } from "./crawlConfig";
 export { buildAllowedHostSet, normalizeAbsoluteUrl, normalizeUrl, parseSeedUrl } from "./url";

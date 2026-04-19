@@ -10,8 +10,10 @@ export type FetchClassification = {
 /**
  * Classifies HTTP status codes for a completed response (headers available).
  *
- * **429**: `retryable: false`, terminal `HTTP_TERMINAL` (rate limit). There is no env-based
- * retry multiplier for 429; the worker host-cooldown path may still react to 429 responses.
+ * **408**, **421**, **425**, **429**: `retryable: true`; URL-level retries apply until **`maxRetries`**
+ * is exhausted, then terminal **`HTTP_TERMINAL`** with the same HTTP status. The worker may honor
+ * **`Retry-After`** for BullMQ delay when valid (**429** only); otherwise normal backoff applies.
+ * Host cooldown may still apply after a **429** response.
  *
  * **5xx**: `retryable: true` until URL-level retries are exhausted, then terminal `HTTP_TERMINAL`.
  */
@@ -52,6 +54,15 @@ export function classifyHttpResponse(statusCode: number, contentType: string | n
       terminalStatus: "NOT_FOUND"
     };
   }
+  if (statusCode === 408 || statusCode === 421 || statusCode === 425 || statusCode === 429) {
+    return {
+      retryable: true,
+      reason: `retryable_http_${statusCode}`,
+      httpStatus: statusCode,
+      contentType,
+      terminalStatus: "HTTP_TERMINAL"
+    };
+  }
   if (statusCode >= 500 && statusCode < 600) {
     return {
       retryable: true,
@@ -61,7 +72,7 @@ export function classifyHttpResponse(statusCode: number, contentType: string | n
       terminalStatus: "HTTP_TERMINAL"
     };
   }
-  // Remaining 3xx/4xx including 429 → terminal HTTP (5xx handled above).
+  // Remaining 3xx/4xx (retryable subset handled above) → terminal HTTP (5xx handled above).
   if (statusCode >= 300 && statusCode < 600) {
     return {
       retryable: false,

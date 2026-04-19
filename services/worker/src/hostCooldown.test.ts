@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { HostCooldown } from "./hostCooldown";
+import { classifyHttpResponse } from "@crawler/shared";
+import { HostCooldown, shouldCooldownForHttpClassification } from "./hostCooldown";
+
+describe("shouldCooldownForHttpClassification", () => {
+  it("still applies to retryable 429 responses", () => {
+    expect(shouldCooldownForHttpClassification(classifyHttpResponse(429, null))).toBe(true);
+  });
+});
 
 describe("HostCooldown", () => {
   it("no-ops wait and record when base backoff is disabled", async () => {

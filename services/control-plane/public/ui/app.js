@@ -38,6 +38,7 @@ const el = {
   graphRefreshSlider: document.getElementById("graph-refresh-slider"),
   graphRefreshValue: document.getElementById("graph-refresh-value"),
   graphFitBtn: document.getElementById("graph-fit-btn"),
+  graphPanelDetails: document.getElementById("graph-panel-details"),
   urlsPrev: document.getElementById("urls-prev"),
   urlsNext: document.getElementById("urls-next"),
   urlsPageStatus: document.getElementById("urls-page-status")
@@ -249,6 +250,9 @@ function renderGraph(snapshot) {
     graphView.clear("Click a node for details.");
     return;
   }
+  if (!el.graphPanelDetails.open) {
+    return;
+  }
   const urlsRows = snapshot.urls?.urls ?? [];
   if (!urlsRows.length) {
     lastGraphSignature = null;
@@ -338,6 +342,17 @@ const graphPoller = createRunPoller(
   DEFAULT_GRAPH_REFRESH_SEC * 1000
 );
 
+function resumeGraphPollingAfterExpand() {
+  if (!activeRunId) {
+    return;
+  }
+  if (graphRunTerminal) {
+    void fetchGraphSnapshot(activeRunId).then((snap) => renderGraph(snap));
+    return;
+  }
+  graphPoller.start(activeRunId);
+}
+
 const poller = createRunPoller(
   fetchMainSnapshot,
   (snapshot) => {
@@ -356,6 +371,14 @@ el.graphRefreshSlider.addEventListener("input", () => {
 });
 syncGraphRefreshLabel();
 
+el.graphPanelDetails.addEventListener("toggle", () => {
+  if (!el.graphPanelDetails.open) {
+    graphPoller.stop();
+    return;
+  }
+  resumeGraphPollingAfterExpand();
+});
+
 el.graphFitBtn.addEventListener("click", () => {
   graphAutoFitEnabled = true;
   graphView.fit();
@@ -369,7 +392,7 @@ const TAB_RETURN_DEBOUNCE_MS = 180;
  * Nudge vis-network physics after fresh data while the crawl is active (skipped for completed/static graph).
  */
 function wakeGraphIfAppropriate() {
-  if (!activeRunId) {
+  if (!activeRunId || !el.graphPanelDetails.open) {
     return;
   }
   const { nodeCount } = graphView.getCounts();
@@ -390,7 +413,14 @@ async function runTabReturnRefresh() {
   if (!activeRunId || document.visibilityState !== "visible") {
     return;
   }
-  await Promise.all([poller.triggerNow(), graphPoller.triggerNow()]);
+  await poller.triggerNow();
+  if (el.graphPanelDetails.open) {
+    if (graphRunTerminal) {
+      void fetchGraphSnapshot(activeRunId).then((snap) => renderGraph(snap));
+    } else {
+      await graphPoller.triggerNow();
+    }
+  }
   requestAnimationFrame(() => {
     wakeGraphIfAppropriate();
   });
@@ -477,6 +507,7 @@ el.form.addEventListener("submit", async (ev) => {
     el.graphWarn.textContent = "";
     el.graphNodeInfo.textContent = "Click a node for details.";
     el.runConfig.textContent = JSON.stringify(run.run_config ?? settings, null, 2);
+    el.graphPanelDetails.open = true;
     poller.start(activeRunId);
     graphPoller.start(activeRunId);
   } catch (err) {

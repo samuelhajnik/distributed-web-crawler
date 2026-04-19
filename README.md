@@ -125,14 +125,17 @@ See [docs/architecture.md](docs/architecture.md) for a URL state machine, data m
 
 ### Retry policy
 
+HTTP outcomes are classified in `packages/shared` (`classifyHttpResponse`); transport/runtime outcomes use `classifyExecutionError`. URL-level retries are bounded by per-run **`maxRetries`** (defaults from env **`MAX_RETRIES`** via the control plane).
+
 - **2xx + HTML**: parse links, insert children, mark `VISITED`.
 - **2xx non-HTML**: mark `VISITED`, no link extraction.
 - **301**: terminal `REDIRECT_301`.
 - **403**: terminal `FORBIDDEN` (request completed; access denied by target).
 - **404**: terminal `NOT_FOUND`.
-- **5xx**: **retryable** first (re-queued with backoff up to `MAX_RETRIES`); when retries are exhausted, terminal `HTTP_TERMINAL`.
-- **Other non-2xx HTTP responses** (e.g. **401**, **410**, **429**, and other **3xx/4xx** not listed above): terminal `HTTP_TERMINAL`.
-- **Crawler-side failures (DNS/connect/timeouts without valid HTTP response, runtime/parser errors)**: `FAILED` (retryable when classified transient; bounded by `MAX_RETRIES`).
+- **5xx**: classified **retryable**; the URL is re-queued with backoff until **`maxRetries`** is exhausted, then terminal **`HTTP_TERMINAL`**.
+- **429** (rate limit): terminal **`HTTP_TERMINAL`** and **not** URL-retried (`retryable: false` in classification). The worker may still apply **process-local host cooldown** after a 429 (see **Fetch concurrency / politeness**).
+- **Other 3xx/4xx** not listed above (e.g. **401**, **410**): terminal **`HTTP_TERMINAL`**; **not** URL-retried.
+- **Crawler-side failures** (no completed HTTP response, transport/DNS, runtime/parser errors): terminal **`FAILED`** when retries are exhausted; cases classified **retryable** (including many network/timeout errors and **AbortController** request-timeout aborts when classified as retryable) are re-queued until **`maxRetries`** is exhausted.
 
 ### Completion detection
 
@@ -240,6 +243,8 @@ TEST_GRAPH_SEED=91817 npm run test:e2e:generated
 | `GET` | `/health` | Liveness |
 
 ### Start a crawl (`POST /crawl-runs`)
+
+Example below uses values aligned with **`DEFAULT_CRAWL_RUN_CONFIG`** in `packages/shared` (control-plane env such as **`CRAWL_MAX_PAGES`** / **`CRAWL_MAX_DEPTH`** can override defaults for omitted fields).
 
 ```bash
 curl -sS -X POST http://localhost:3000/crawl-runs \

@@ -121,48 +121,53 @@
         <p id="poll-status" class="poll-status muted">Polling idle.</p>
       </section>
 
-      <section class="panel panel--graph">
-        <div class="panel-toolbar">
-          <div class="panel-toolbar-left">
-            <h2 class="panel-toolbar-title">Lineage graph</h2>
-            <span id="graph-meta" class="panel-meta" aria-live="polite">—</span>
-            <span id="graph-warn" class="panel-meta panel-meta--warn" aria-live="polite"></span>
-          </div>
-          <div class="panel-toolbar-right graph-controls">
-            <div class="graph-refresh-control">
-              <label class="graph-refresh-label" for="graph-refresh-slider">
-                Refresh <span id="graph-refresh-value">3s</span>
-              </label>
-              <input
-                id="graph-refresh-slider"
-                type="range"
-                min="1"
-                max="10"
-                step="1"
-                value="3"
-                aria-valuemin="1"
-                aria-valuemax="10"
-                aria-valuenow="3"
-                aria-label="Graph refresh interval in seconds"
-              />
+      <details class="panel panel--graph graph-panel-details" id="graph-panel-details" open>
+        <summary class="graph-panel-summary">
+          <span class="graph-panel-summary-title">Lineage graph</span>
+          <span class="muted graph-panel-summary-hint">Show or hide</span>
+        </summary>
+        <div class="graph-panel-body">
+          <div class="panel-toolbar">
+            <div class="panel-toolbar-left">
+              <span id="graph-meta" class="panel-meta" aria-live="polite">—</span>
+              <span id="graph-warn" class="panel-meta panel-meta--warn" aria-live="polite"></span>
             </div>
-            <button id="graph-fit-btn" type="button" class="btn-secondary graph-fit-btn">Fit graph</button>
+            <div class="panel-toolbar-right graph-controls">
+              <div class="graph-refresh-control">
+                <label class="graph-refresh-label" for="graph-refresh-slider">
+                  Refresh <span id="graph-refresh-value">3s</span>
+                </label>
+                <input
+                  id="graph-refresh-slider"
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="1"
+                  value="3"
+                  aria-valuemin="1"
+                  aria-valuemax="10"
+                  aria-valuenow="3"
+                  aria-label="Graph refresh interval in seconds"
+                />
+              </div>
+              <button id="graph-fit-btn" type="button" class="btn-secondary graph-fit-btn">Fit graph</button>
+            </div>
           </div>
+          <div class="graph-legend" aria-label="Lineage graph legend">
+            <span class="legend-chip"><span class="dot visited"></span> Visited</span>
+            <span class="legend-chip"><span class="dot queued"></span> Queued</span>
+            <span class="legend-chip"><span class="dot in-progress"></span> In progress</span>
+            <span class="legend-chip"><span class="dot redirect301"></span> Redirect</span>
+            <span class="legend-chip"><span class="dot forbidden"></span> Forbidden</span>
+            <span class="legend-chip"><span class="dot not-found"></span> Not found</span>
+            <span class="legend-chip"><span class="dot http-terminal"></span> Other HTTP</span>
+            <span class="legend-chip"><span class="dot failed"></span> Failed</span>
+            <span class="legend-chip"><span class="dot root-ring"></span> Seed</span>
+          </div>
+          <div id="graph-container" class="graph-canvas"></div>
+          <div id="graph-node-info" class="graph-node-detail muted">Click a node for details.</div>
         </div>
-        <div class="graph-legend" aria-label="Lineage graph legend">
-          <span class="legend-chip"><span class="dot visited"></span> Visited</span>
-          <span class="legend-chip"><span class="dot queued"></span> Queued</span>
-          <span class="legend-chip"><span class="dot in-progress"></span> In progress</span>
-          <span class="legend-chip"><span class="dot redirect301"></span> Redirect</span>
-          <span class="legend-chip"><span class="dot forbidden"></span> Forbidden</span>
-          <span class="legend-chip"><span class="dot not-found"></span> Not found</span>
-          <span class="legend-chip"><span class="dot http-terminal"></span> Other HTTP</span>
-          <span class="legend-chip"><span class="dot failed"></span> Failed</span>
-          <span class="legend-chip"><span class="dot root-ring"></span> Seed</span>
-        </div>
-        <div id="graph-container" class="graph-canvas"></div>
-        <div id="graph-node-info" class="graph-node-detail muted">Click a node for details.</div>
-      </section>
+      </details>
 
       <section class="panel">
         <div class="panel-toolbar panel-toolbar--urls">

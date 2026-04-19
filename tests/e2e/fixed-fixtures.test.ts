@@ -69,7 +69,7 @@ describe("E2E fixed fixtures", () => {
     await runCase((dir, origin) => writeDuplicateAndExternalFixture(dir, origin));
   });
 
-  it("broken internal link -> one FAILED", async () => {
+  it("broken internal link -> one NOT_FOUND", async () => {
     await runCase((dir, origin) => writeBrokenLinkFixture(dir, origin));
   });
 

@@ -228,6 +228,30 @@ async function markFailed(
   logW(crawlRunId, urlId, `terminal-failure reason="${message}"`);
 }
 
+async function markTerminalHttpOutcome(
+  crawlRunId: number,
+  urlId: number,
+  terminalStatus: "REDIRECT_301" | "FORBIDDEN" | "NOT_FOUND" | "HTTP_TERMINAL",
+  message: string,
+  httpStatus: number | null,
+  contentType: string | null
+): Promise<void> {
+  await pgPool.query(
+    `
+      UPDATE crawl_urls
+      SET status = $2,
+          last_error = $3,
+          http_status = $4,
+          content_type = $5,
+          claimed_at = NULL,
+          claimed_by_worker = NULL
+      WHERE id = $1
+    `,
+    [urlId, terminalStatus, message, httpStatus, contentType]
+  );
+  logW(crawlRunId, urlId, `terminal-http status=${terminalStatus} reason="${message}"`);
+}
+
 async function markFailedOrRetry(
   crawlRunId: number,
   urlId: number,
@@ -260,6 +284,22 @@ async function markFailedOrRetry(
     return;
   }
 
+  if (
+    classification.terminalStatus === "FORBIDDEN" ||
+    classification.terminalStatus === "NOT_FOUND" ||
+    classification.terminalStatus === "HTTP_TERMINAL" ||
+    classification.terminalStatus === "REDIRECT_301"
+  ) {
+    await markTerminalHttpOutcome(
+      crawlRunId,
+      urlId,
+      classification.terminalStatus,
+      classification.reason,
+      classification.httpStatus,
+      classification.contentType
+    );
+    return;
+  }
   await markFailed(crawlRunId, urlId, classification.reason, classification.httpStatus, classification.contentType);
 }
 

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS crawl_urls (
   id BIGSERIAL PRIMARY KEY,
   crawl_run_id BIGINT NOT NULL REFERENCES crawl_runs(id) ON DELETE CASCADE,
   normalized_url TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('QUEUED', 'IN_PROGRESS', 'VISITED', 'FAILED')),
+  status TEXT NOT NULL CHECK (status IN ('QUEUED', 'IN_PROGRESS', 'VISITED', 'REDIRECT_301', 'FORBIDDEN', 'NOT_FOUND', 'HTTP_TERMINAL', 'FAILED')),
   claimed_at TIMESTAMPTZ,
   claimed_by_worker TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS crawl_urls (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (crawl_run_id, normalized_url)
 );
+
+ALTER TABLE crawl_urls DROP CONSTRAINT IF EXISTS crawl_urls_status_check;
+ALTER TABLE crawl_urls
+  ADD CONSTRAINT crawl_urls_status_check
+  CHECK (status IN ('QUEUED', 'IN_PROGRESS', 'VISITED', 'REDIRECT_301', 'FORBIDDEN', 'NOT_FOUND', 'HTTP_TERMINAL', 'FAILED'));
 
 ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
 ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS claimed_by_worker TEXT;

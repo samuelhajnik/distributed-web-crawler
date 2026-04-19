@@ -467,6 +467,15 @@ button:disabled {
 .dot.redirect301 {
   background: #2563eb;
 }
+.dot.forbidden {
+  background: #facc15;
+}
+.dot.not-found {
+  background: #0369a1;
+}
+.dot.http-terminal {
+  background: #7c3aed;
+}
 .dot.failed {
   background: #b91c1c;
 }

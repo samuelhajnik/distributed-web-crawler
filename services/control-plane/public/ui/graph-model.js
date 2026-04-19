@@ -10,26 +10,49 @@ export const GRAPH_NODE_PALETTE = {
   visited: { bg: "#15803d", borderDefault: "#166534" },
   queued: { bg: "#9ca3af", borderDefault: "#6b7280" },
   inProgress: { bg: "#ea580c", borderDefault: "#c2410c" },
-  /** FAILED when worker classified redirect as unexpected (not the same as hard fetch failure). */
   redirect301: { bg: "#2563eb", borderDefault: "#1d4ed8" },
+  forbidden: { bg: "#facc15", borderDefault: "#eab308" },
+  notFound: { bg: "#0369a1", borderDefault: "#075985" },
+  httpTerminal: { bg: "#7c3aed", borderDefault: "#6d28d9" },
   failed: { bg: "#b91c1c", borderDefault: "#991b1b" }
 };
 
-function lastErrorText(row) {
-  return String(row?.last_error ?? "");
-}
-
-function isRedirect301Failure(row) {
-  return normalizeStatus(row.status) === "FAILED" && lastErrorText(row).includes("unexpected_http_301");
+function formatNodeStatusLabel(status, httpStatus) {
+  const s = normalizeStatus(status);
+  if (s === "REDIRECT_301") {
+    return "Redirect (301)";
+  }
+  if (s === "FORBIDDEN") {
+    return "Forbidden (403)";
+  }
+  if (s === "NOT_FOUND") {
+    return "Not found (404)";
+  }
+  if (s === "HTTP_TERMINAL") {
+    return httpStatus ? `Other HTTP (${httpStatus})` : "Other HTTP";
+  }
+  return String(status ?? "");
 }
 
 /**
- * Maps a crawl_urls row to a palette key (failed split into redirect vs hard failure).
+ * Maps crawl_urls status to graph palette key.
  */
 export function classifyGraphNodeKind(row) {
   const s = normalizeStatus(row?.status);
+  if (s === "REDIRECT_301") {
+    return "redirect301";
+  }
+  if (s === "FORBIDDEN") {
+    return "forbidden";
+  }
+  if (s === "NOT_FOUND") {
+    return "notFound";
+  }
+  if (s === "HTTP_TERMINAL") {
+    return "httpTerminal";
+  }
   if (s === "FAILED") {
-    return isRedirect301Failure(row) ? "redirect301" : "failed";
+    return "failed";
   }
   if (s === "VISITED" || s === "COMPLETED" || s === "SUCCEEDED") {
     return "visited";
@@ -103,7 +126,7 @@ export function formatNodeInfo(row) {
   return [
     `id: ${row.id}`,
     `url: ${row.normalized_url ?? ""}`,
-    `status: ${row.status ?? ""}`,
+    `status: ${formatNodeStatusLabel(row.status, row.http_status)}`,
     `depth: ${row.depth ?? 0}`,
     `discovered_from_url_id: ${row.discovered_from_url_id ?? "-"}`,
     `last_error: ${row.last_error ?? "-"}`,

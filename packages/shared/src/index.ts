@@ -6,7 +6,15 @@ import type { CrawlJobPayload } from "./types";
 
 dotenv.config();
 
-export type UrlStatus = "QUEUED" | "IN_PROGRESS" | "VISITED" | "FAILED";
+export type UrlStatus =
+  | "QUEUED"
+  | "IN_PROGRESS"
+  | "VISITED"
+  | "REDIRECT_301"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "HTTP_TERMINAL"
+  | "FAILED";
 export type RunStatus = "RUNNING" | "COMPLETED" | "FAILED";
 
 export type { CrawlJobPayload } from "./types";

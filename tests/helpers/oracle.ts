@@ -14,8 +14,9 @@ export type LocalPageGraph = {
 export type OracleResult = {
   allUrls: Set<string>;
   visited: Set<string>;
+  notFound: Set<string>;
   failed: Set<string>;
-  totals: { discovered: number; visited: number; failed: number };
+  totals: { discovered: number; visited: number; notFound: number; failed: number };
 };
 
 function extractHrefs(html: string): string[] {
@@ -40,6 +41,7 @@ export function simulateLocalCrawl(seedUrl: string, graph: LocalPageGraph): Orac
 
   const allUrls = new Set<string>([seedNorm]);
   const visited = new Set<string>();
+  const notFound = new Set<string>();
   const failed = new Set<string>();
   const queue: string[] = [seedNorm];
 
@@ -47,7 +49,7 @@ export function simulateLocalCrawl(seedUrl: string, graph: LocalPageGraph): Orac
     const u = queue.shift()!;
     const html = graph.pages.get(u);
     if (html === undefined) {
-      failed.add(u);
+      notFound.add(u);
       continue;
     }
     visited.add(u);
@@ -66,10 +68,12 @@ export function simulateLocalCrawl(seedUrl: string, graph: LocalPageGraph): Orac
   return {
     allUrls,
     visited,
+    notFound,
     failed,
     totals: {
       discovered: allUrls.size,
       visited: visited.size,
+      notFound: notFound.size,
       failed: failed.size
     }
   };

@@ -8,21 +8,48 @@ describe("classifyHttpResponse", () => {
     expect(r.retryable).toBe(false);
   });
 
-  it("treats 5xx as retryable", () => {
+  it("treats 5xx as retryable transient server outcomes", () => {
     const r = classifyHttpResponse(503, null, 4);
     expect(r.retryable).toBe(true);
-    expect(r.reason).toContain("503");
+    expect(r.reason).toBe("retryable_http_503");
+    expect(r.terminalStatus).toBe("HTTP_TERMINAL");
   });
 
   it("treats most 4xx as terminal", () => {
-    const r = classifyHttpResponse(404, null, 4);
+    const r = classifyHttpResponse(401, null, 4);
     expect(r.retryable).toBe(false);
+    expect(r.terminalStatus).toBe("HTTP_TERMINAL");
   });
 
-  it("treats 429 as retryable with multiplier", () => {
-    const r = classifyHttpResponse(429, null, 4);
+  it("maps 403 to terminal forbidden", () => {
+    const r = classifyHttpResponse(403, null, 4);
+    expect(r.retryable).toBe(false);
+    expect(r.reason).toBe("terminal_http_403");
+    expect(r.terminalStatus).toBe("FORBIDDEN");
+  });
+
+  it("maps 404 to terminal not_found", () => {
+    const r = classifyHttpResponse(404, null, 4);
+    expect(r.retryable).toBe(false);
+    expect(r.terminalStatus).toBe("NOT_FOUND");
+  });
+
+  it("maps 410 to terminal http outcome without retry", () => {
+    const r = classifyHttpResponse(410, null, 4);
+    expect(r.retryable).toBe(false);
+    expect(r.terminalStatus).toBe("HTTP_TERMINAL");
+  });
+
+  it("keeps 500 retryable but terminal bucket for exhausted retries", () => {
+    const r = classifyHttpResponse(500, null, 4);
     expect(r.retryable).toBe(true);
-    expect(r.backoffMultiplier).toBe(4);
+    expect(r.terminalStatus).toBe("HTTP_TERMINAL");
+  });
+
+  it("maps 301 to redirect status", () => {
+    const r = classifyHttpResponse(301, null, 4);
+    expect(r.retryable).toBe(false);
+    expect(r.terminalStatus).toBe("REDIRECT_301");
   });
 });
 

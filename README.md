@@ -25,9 +25,9 @@ flowchart LR
 
 **Flow:** the control plane reads and updates Postgres, publishes jobs to Redis, and runs **reconciliation + lease-based stale recovery** so `QUEUED` rows are re-published and stale `IN_PROGRESS` rows can be reclaimed. Workers **consume Redis jobs, claim rows atomically in Postgres, fetch and parse, then write frontier updates back to Postgres**.
 
-![Demo UI — completed crawl](docs/screenshots/demo-ui-completed.png)
+![Demo UI — completed crawl](docs/screenshots/demo-ui-lineage-graph.png)
 
-*Completed crawl: final run counters and lineage graph.*
+*Demo UI — completed crawl with lineage graph and URL inspection surfaces.*
 
 ## What this repo demonstrates
 
@@ -69,7 +69,7 @@ These properties cover both safety (no concurrent duplicate row-level processing
 - **Discovered URLs are durably stored in Postgres once inserted, and reconciliation plus lease recovery ensure they are not permanently stranded.**
 - **Duplicate discoveries are deduplicated at insert time via a uniqueness constraint, and atomic claiming ensures that only one worker processes a row at a time.**
 - **Multi-worker execution converges to the same normalized URL set as single-worker execution under the same normalization and host-scope rules.**
-- **Under bounded retries and stable dependencies, frontier rows transition to terminal states (`VISITED` or `FAILED`), allowing the run to complete.**
+- **Under bounded retries and stable dependencies, frontier rows transition to terminal states (`VISITED`, `REDIRECT_301`, `FORBIDDEN`, `NOT_FOUND`, `HTTP_TERMINAL`, or `FAILED`), allowing the run to complete.**
 
 Reviewers can verify these properties using the export/summary APIs, the E2E fixture tests, and the comparison workflow (`npm run compare-results`).
 
@@ -125,9 +125,11 @@ See [docs/architecture.md](docs/architecture.md) for a URL state machine, data m
 
 - **2xx + HTML**: parse links, insert children, mark `VISITED`.
 - **2xx non-HTML**: mark `VISITED`, no link extraction.
-- **5xx, 429**: retryable with exponential backoff; **429** uses `RETRY_429_MULTIPLIER` on top of the base backoff.
-- **Most other 4xx**: terminal `FAILED`.
-- **Transient network/DNS/timeouts**: retryable (bounded by `MAX_RETRIES`).
+- **301**: terminal `REDIRECT_301`.
+- **403**: terminal `FORBIDDEN` (request completed; access denied by target).
+- **404**: terminal `NOT_FOUND`.
+- **Other non-2xx HTTP responses (including 401/410/429/5xx)**: terminal `HTTP_TERMINAL`.
+- **Crawler-side failures (DNS/connect/timeouts without valid HTTP response, runtime/parser errors)**: `FAILED` (retryable when classified transient; bounded by `MAX_RETRIES`).
 
 ### Completion detection
 
@@ -143,21 +145,29 @@ After each maintenance cycle: recover stale → reconcile → read counts → up
 
 The control plane serves a minimal browser UI at `http://localhost:3000/ui/`. It is intentionally **polling-based** (no server push): the client periodically fetches JSON and re-renders **run summary**, an interactive **lineage graph**, and a **paginated URL table** for inspection.
 
-![Before run](docs/screenshots/demo-ui-before-run.png)
+![Demo UI — run summary](docs/screenshots/demo-ui-run-summary.png)
 
-*Before run — Configure a crawl from the demo UI.*
+*Start a crawl and inspect live run counters and final status.*
 
-![Running](docs/screenshots/demo-ui-running.png)
+### Graph evolution during a run
 
-*Running — Live polling updates run state and lineage graph during execution.*
+The lineage graph is most useful while the crawl is still active, because the discovered structure becomes visible as the frontier expands.
 
-![Node detail](docs/screenshots/demo-ui-node-detail.png)
+![Demo UI — graph early](docs/screenshots/demo-ui-graph-early.png)
 
-*Node detail — Click a node to inspect URL metadata and terminal outcome.*
+*Early stage — the crawl begins expanding outward from the seed URL.*
 
-![URL table](docs/screenshots/demo-ui-urls-table.png)
+![Demo UI — graph mid](docs/screenshots/demo-ui-graph-mid.png)
 
-*URL table — Paginated URL rows with status, depth, parent, and error details.*
+*Mid-run — more branches and terminal outcomes become visible as the crawl progresses.*
+
+![Demo UI — graph late](docs/screenshots/demo-ui-graph-large.png)
+
+*Late stage — a larger crawl makes the discovered lineage and outcome distribution much easier to inspect.*
+
+![Demo UI — URL table](docs/screenshots/demo-ui-urls-table.png)
+
+*Paginated URL inspection view with status, depth, lineage, and terminal outcome details.*
 
 **Behavior notes:** **Run status and counters** come from `/crawl-runs/:id/summary` (~every **1.5s** while a run is active). The **URL table** uses the same loop with **200** rows per page (`limit`/`offset`), **Previous** / **Next**, and refreshes the current page without jumping to page 1. **Lineage graph** polling is separate and loads up to **50,000** URL rows from `/urls` plus a matching `/graph` edge limit. **Graph refresh interval** is configurable in the UI (**1–10s**, default **3s**); it only affects browser polling, not `run_config`.
 

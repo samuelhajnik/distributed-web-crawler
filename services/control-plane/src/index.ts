@@ -34,6 +34,10 @@ type RunCounts = {
   queued_count: number;
   in_progress_count: number;
   visited_count: number;
+  redirect_301_count: number;
+  forbidden_count: number;
+  not_found_count: number;
+  http_terminal_count: number;
   failed_count: number;
 };
 type CompletionStability = {
@@ -120,6 +124,10 @@ async function getRunCounts(crawlRunId: number): Promise<RunCounts> {
         COUNT(*) FILTER (WHERE status = 'QUEUED')::int AS queued_count,
         COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS in_progress_count,
         COUNT(*) FILTER (WHERE status = 'VISITED')::int AS visited_count,
+        COUNT(*) FILTER (WHERE status = 'REDIRECT_301')::int AS redirect_301_count,
+        COUNT(*) FILTER (WHERE status = 'FORBIDDEN')::int AS forbidden_count,
+        COUNT(*) FILTER (WHERE status = 'NOT_FOUND')::int AS not_found_count,
+        COUNT(*) FILTER (WHERE status = 'HTTP_TERMINAL')::int AS http_terminal_count,
         COUNT(*) FILTER (WHERE status = 'FAILED')::int AS failed_count
       FROM crawl_urls
       WHERE crawl_run_id = $1
@@ -352,6 +360,10 @@ app.get("/crawl-runs/:id/summary", async (req, res) => {
       SELECT
         COUNT(*)::int AS total_discovered,
         COUNT(*) FILTER (WHERE status = 'VISITED')::int AS total_visited,
+        COUNT(*) FILTER (WHERE status = 'REDIRECT_301')::int AS total_redirect_301,
+        COUNT(*) FILTER (WHERE status = 'FORBIDDEN')::int AS total_forbidden,
+        COUNT(*) FILTER (WHERE status = 'NOT_FOUND')::int AS total_not_found,
+        COUNT(*) FILTER (WHERE status = 'HTTP_TERMINAL')::int AS total_http_terminal,
         COUNT(*) FILTER (WHERE status = 'FAILED')::int AS total_failed,
         COUNT(*) FILTER (WHERE status = 'QUEUED')::int AS total_queued,
         COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS total_in_progress,
@@ -378,6 +390,10 @@ app.get("/crawl-runs/:id/summary", async (req, res) => {
       totals: {
         discovered: a.total_discovered,
         visited: a.total_visited,
+        redirect_301: a.total_redirect_301,
+        forbidden: a.total_forbidden,
+        not_found: a.total_not_found,
+        http_terminal: a.total_http_terminal,
         failed: a.total_failed,
         queued: a.total_queued,
         in_progress: a.total_in_progress,
@@ -538,6 +554,10 @@ app.get("/crawl-runs/:id", async (req, res) => {
       allowed_hosts: run.allowed_hosts,
       run_config: publicRunConfig(run.run_config),
       visited_count: counts.visited_count,
+      redirect_301_count: counts.redirect_301_count,
+      forbidden_count: counts.forbidden_count,
+      not_found_count: counts.not_found_count,
+      http_terminal_count: counts.http_terminal_count,
       failed_count: counts.failed_count,
       duplicates_skipped: run.duplicates_skipped,
       queue_empty: counts.queued_count === 0,
@@ -565,7 +585,16 @@ app.get("/crawl-runs/:id/urls", async (req, res) => {
     const sortKey = typeof req.query.sort === "string" ? req.query.sort.toLowerCase() : "id";
     const orderRaw = typeof req.query.order === "string" ? req.query.order.toLowerCase() : "asc";
     const order = orderRaw === "desc" ? "DESC" : "ASC";
-    const allowedStatuses = new Set(["QUEUED", "IN_PROGRESS", "VISITED", "FAILED"]);
+    const allowedStatuses = new Set([
+      "QUEUED",
+      "IN_PROGRESS",
+      "VISITED",
+      "REDIRECT_301",
+      "FORBIDDEN",
+      "NOT_FOUND",
+      "HTTP_TERMINAL",
+      "FAILED"
+    ]);
     if (Number.isNaN(crawlRunId)) {
       res.status(400).json({ error: "Invalid run id" });
       return;

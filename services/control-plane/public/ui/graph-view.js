@@ -5,6 +5,7 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
   const { onUserViewportInteraction } = hooks;
   let suppressViewportInteraction = false;
   let fitSoonTimer = null;
+  let largeGraphMode = false;
 
   // vis-network UMD global loaded from CDN in index.html
   const visNetwork = window.vis;
@@ -29,6 +30,18 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
       nodes: { borderWidth: 1, borderWidthSelected: 2 }
     }
   );
+
+  const normalNetworkOptions = {
+    physics: physicsOptions,
+    edges: { smooth: { type: "continuous" }, arrows: { to: true } },
+    interaction: { hover: true, navigationButtons: true, zoomView: true }
+  };
+  const largeNetworkOptions = {
+    // Freeze layout for responsiveness once graphs get large.
+    physics: false,
+    edges: { smooth: false, arrows: { to: true } },
+    interaction: { hover: false, navigationButtons: true, zoomView: true }
+  };
 
   function syncDataSet(dataSet, nextItems) {
     const nextIds = new Set(nextItems.map((item) => String(item.id)));
@@ -119,9 +132,32 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
     }
     data.nodes.clear();
     data.edges.clear();
-    network.setOptions({ physics: physicsOptions });
+    setLargeGraphMode(false);
     infoEl.textContent = message ?? "No node selected";
   }
 
-  return { render, clear, fit, fitSoon, getCounts };
+  function setLargeGraphMode(enabled) {
+    const next = Boolean(enabled);
+    if (next === largeGraphMode) {
+      return;
+    }
+    largeGraphMode = next;
+    network.setOptions(next ? largeNetworkOptions : normalNetworkOptions);
+    if (!next) {
+      network.startSimulation();
+    }
+  }
+
+  function isLargeGraphMode() {
+    return largeGraphMode;
+  }
+
+  function resumeLayout() {
+    if (!network || largeGraphMode) {
+      return;
+    }
+    network.startSimulation();
+  }
+
+  return { render, clear, fit, fitSoon, getCounts, setLargeGraphMode, isLargeGraphMode, resumeLayout };
 }

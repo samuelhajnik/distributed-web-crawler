@@ -9,6 +9,10 @@ export type SummaryResponse = {
   totals: {
     discovered: number;
     visited: number;
+    redirect_301: number;
+    forbidden: number;
+    not_found: number;
+    http_terminal: number;
     failed: number;
     queued: number;
     in_progress: number;

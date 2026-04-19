@@ -21,6 +21,10 @@ const el = {
   queued: document.getElementById("c-queued"),
   inProgress: document.getElementById("c-in-progress"),
   visited: document.getElementById("c-visited"),
+  redirect301: document.getElementById("c-redirect-301"),
+  forbidden: document.getElementById("c-forbidden"),
+  notFound: document.getElementById("c-not-found"),
+  httpTerminal: document.getElementById("c-http-terminal"),
   failed: document.getElementById("c-failed"),
   discovered: document.getElementById("c-discovered"),
   pollStatus: document.getElementById("poll-status"),
@@ -49,11 +53,15 @@ let urlsTableOffset = 0;
 const URL_TABLE_LIMIT = 200;
 /** Rows/edges fetched for lineage graph construction (aligned with GET /graph limit). */
 const GRAPH_URL_LIMIT = 50000;
+/** Above this size, UI switches to lower-cost graph rendering behavior. */
+const LARGE_GRAPH_NODE_THRESHOLD = 900;
+const LARGE_GRAPH_POLL_MS = 6000;
 
 /** Auto-fit viewport on growth until the user pans/zooms; “Fit graph” re-enables. */
 let graphAutoFitEnabled = true;
 let lastRenderedGraphNodeCount = 0;
 let lastRenderedGraphEdgeCount = 0;
+let graphLargeModeActive = false;
 
 const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo, {
   onUserViewportInteraction: () => {
@@ -63,6 +71,14 @@ const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo, {
 
 /** Deterministic snapshot of UI-relevant graph content for comparing polls. */
 function buildGraphSignature(model) {
+  if (model.nodeCount >= LARGE_GRAPH_NODE_THRESHOLD) {
+    // Large-graph mode: avoid O(n log n) sorting each poll.
+    const nodePart = model.nodes
+      .map((n) => `${String(n.id)}:${n.color?.background ?? ""}:${n.color?.border ?? ""}`)
+      .join("|");
+    const edgePart = model.edges.map((e) => `${String(e.from)}>${String(e.to)}`).join("|");
+    return `${model.nodeCount}/${model.edgeCount}/${nodePart}/${edgePart}`;
+  }
   const nodeLines = model.nodes
     .map((n) =>
       JSON.stringify({
@@ -129,8 +145,20 @@ function runStatusVariant(status) {
   return "neutral";
 }
 
-function formatUrlStatus(status) {
+function formatUrlStatus(status, httpStatus = null, includeCode = false) {
   const u = String(status ?? "").toUpperCase();
+  if (u === "REDIRECT_301") {
+    return includeCode ? "Redirect (301)" : "Redirect";
+  }
+  if (u === "FORBIDDEN") {
+    return includeCode ? "Forbidden (403)" : "Forbidden";
+  }
+  if (u === "NOT_FOUND") {
+    return includeCode ? "Not found (404)" : "Not found";
+  }
+  if (u === "HTTP_TERMINAL") {
+    return includeCode && httpStatus != null ? `Other HTTP (${httpStatus})` : "Other HTTP";
+  }
   const labels = {
     QUEUED: "Queued",
     IN_PROGRESS: "In progress",
@@ -157,6 +185,10 @@ function renderSummary(summary) {
   el.queued.textContent = String(totals.queued ?? 0);
   el.inProgress.textContent = String(totals.in_progress ?? 0);
   el.visited.textContent = String(totals.visited ?? 0);
+  el.redirect301.textContent = String(totals.redirect_301 ?? 0);
+  el.forbidden.textContent = String(totals.forbidden ?? 0);
+  el.notFound.textContent = String(totals.not_found ?? 0);
+  el.httpTerminal.textContent = String(totals.http_terminal ?? 0);
   el.failed.textContent = String(totals.failed ?? 0);
   el.discovered.textContent = String(totals.discovered ?? 0);
   el.runConfig.textContent = JSON.stringify(summary?.run_config ?? {}, null, 2);
@@ -200,7 +232,7 @@ function renderUrls(rows, pagination) {
       (r) => `<tr>
       <td class="col-id">${r.id ?? ""}</td>
       <td class="url col-url">${escapeHtml(r.normalized_url ?? "")}</td>
-      <td class="col-status"><span class="cell-status">${formatUrlStatus(r.status)}</span></td>
+      <td class="col-status"><span class="cell-status">${formatUrlStatus(r.status, r.http_status, true)}</span></td>
       <td class="col-depth">${r.depth ?? 0}</td>
       <td class="col-parent">${r.discovered_from_url_id ?? ""}</td>
       <td class="col-error cell-error-text">${escapeHtml(r.last_error ?? "")}</td>
@@ -224,6 +256,7 @@ function renderGraph(snapshot) {
     lastRenderedGraphEdgeCount = 0;
     el.graphMeta.textContent = "No active crawl.";
     el.graphWarn.textContent = "";
+    graphLargeModeActive = false;
     graphView.clear("Click a node for details.");
     return;
   }
@@ -234,23 +267,45 @@ function renderGraph(snapshot) {
     lastRenderedGraphEdgeCount = 0;
     el.graphMeta.textContent = "No URLs yet.";
     el.graphWarn.textContent = snapshot.graphError ? String(snapshot.graphError) : "";
+    graphLargeModeActive = false;
     graphView.clear("Click a node for details.");
     return;
   }
 
   const model = buildLineageGraph(snapshot.urls, snapshot.graph);
   el.graphMeta.textContent = `${model.nodeCount.toLocaleString()} nodes · ${model.edgeCount.toLocaleString()} edges`;
-  el.graphWarn.textContent = snapshot.graphError ? `Incomplete graph data: ${snapshot.graphError}` : "";
+  const largeModeNow = model.nodeCount >= LARGE_GRAPH_NODE_THRESHOLD;
+  const enteredLargeMode = !graphLargeModeActive && largeModeNow;
+  if (largeModeNow !== graphLargeModeActive) {
+    graphLargeModeActive = largeModeNow;
+    graphView.setLargeGraphMode(largeModeNow);
+    // Slow graph poll cadence for large runs to keep UI responsive.
+    const sliderMs = Number(el.graphRefreshSlider.value) * 1000;
+    graphPoller.setPollInterval(largeModeNow ? Math.max(sliderMs, LARGE_GRAPH_POLL_MS) : sliderMs);
+  }
+  const baseWarn = snapshot.graphError ? `Incomplete graph data: ${snapshot.graphError}` : "";
+  const perfWarn = largeModeNow ? "Large graph mode: reduced auto-layout for performance." : "";
+  el.graphWarn.textContent = [baseWarn, perfWarn].filter(Boolean).join(" ");
 
   const signature = buildGraphSignature(model);
   if (signature !== lastGraphSignature) {
     graphView.render(model);
+    if (!largeModeNow) {
+      graphView.resumeLayout();
+    }
     lastGraphSignature = signature;
 
     const grew =
       model.nodeCount > lastRenderedGraphNodeCount || model.edgeCount > lastRenderedGraphEdgeCount;
     if (graphAutoFitEnabled && grew) {
-      graphView.fitSoon({ delayMs: 350 });
+      if (largeModeNow) {
+        // Skip repeated viewport shifts for very large graphs.
+        if (enteredLargeMode || lastRenderedGraphNodeCount === 0) {
+          graphView.fitSoon({ delayMs: 450, duration: 260 });
+        }
+      } else {
+        graphView.fitSoon({ delayMs: 350 });
+      }
     }
 
     lastRenderedGraphNodeCount = model.nodeCount;
@@ -324,7 +379,8 @@ const poller = createRunPoller(
 
 el.graphRefreshSlider.addEventListener("input", () => {
   syncGraphRefreshLabel();
-  graphPoller.setPollInterval(Number(el.graphRefreshSlider.value) * 1000);
+  const sliderMs = Number(el.graphRefreshSlider.value) * 1000;
+  graphPoller.setPollInterval(graphLargeModeActive ? Math.max(sliderMs, LARGE_GRAPH_POLL_MS) : sliderMs);
 });
 syncGraphRefreshLabel();
 
@@ -375,6 +431,7 @@ el.form.addEventListener("submit", async (ev) => {
     graphAutoFitEnabled = true;
     lastRenderedGraphNodeCount = 0;
     lastRenderedGraphEdgeCount = 0;
+    graphLargeModeActive = false;
     urlsTableOffset = 0;
     activeRunId = Number(run.id);
     el.urlsPageStatus.textContent = "";

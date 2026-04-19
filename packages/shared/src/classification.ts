@@ -7,11 +7,15 @@ export type FetchClassification = {
   backoffMultiplier?: number;
 };
 
-export function classifyHttpResponse(
-  statusCode: number,
-  contentType: string | null,
-  _retry429Multiplier: number
-): FetchClassification {
+/**
+ * Classifies HTTP status codes for a completed response (headers available).
+ *
+ * **429**: `retryable: false`, terminal `HTTP_TERMINAL` (rate limit). There is no env-based
+ * retry multiplier for 429; the worker host-cooldown path may still react to 429 responses.
+ *
+ * **5xx**: `retryable: true` until URL-level retries are exhausted, then terminal `HTTP_TERMINAL`.
+ */
+export function classifyHttpResponse(statusCode: number, contentType: string | null): FetchClassification {
   if (statusCode >= 200 && statusCode < 300) {
     return {
       retryable: false,
@@ -57,7 +61,8 @@ export function classifyHttpResponse(
       terminalStatus: "HTTP_TERMINAL"
     };
   }
-  if ((statusCode >= 300 && statusCode < 600) || statusCode === 429) {
+  // Remaining 3xx/4xx including 429 → terminal HTTP (5xx handled above).
+  if (statusCode >= 300 && statusCode < 600) {
     return {
       retryable: false,
       reason: `terminal_http_${statusCode}`,
@@ -77,7 +82,11 @@ export function classifyHttpResponse(
 
 export function classifyExecutionError(err: unknown): FetchClassification {
   const message = (err as Error)?.message ?? String(err);
-  const code = (err as { code?: string })?.code;
+  const rawCode = (err as { code?: string | number })?.code;
+  const codeForReason =
+    rawCode !== undefined && rawCode !== null ? String(rawCode) : "";
+  const codeStr = typeof rawCode === "number" ? String(rawCode) : rawCode;
+
   const retryableCodes = new Set([
     "ECONNRESET",
     "ECONNREFUSED",
@@ -90,11 +99,22 @@ export function classifyExecutionError(err: unknown): FetchClassification {
     "UND_ERR_SOCKET"
   ]);
 
-  const retryableByCode = code ? retryableCodes.has(code) : false;
+  const retryableByCode = typeof codeStr === "string" && retryableCodes.has(codeStr);
   const retryableByMessage = /timeout|timed out|socket|connect|dns|temporar/i.test(message);
+
+  /** Request timeout uses AbortController — same shape as DOM/undici AbortError (e.g. code 20). */
+  const errName = typeof (err as Error)?.name === "string" ? (err as Error).name : "";
+  const retryableAbortFromTimeout =
+    errName === "AbortError" ||
+    rawCode === 20 ||
+    codeStr === "20" ||
+    codeStr === "ABORT_ERR" ||
+    /\baborted\b/i.test(message) ||
+    /\boperation was aborted\b/i.test(message);
+
   return {
-    retryable: retryableByCode || retryableByMessage,
-    reason: `request_error${code ? `_${code}` : ""}: ${message}`,
+    retryable: retryableByCode || retryableByMessage || retryableAbortFromTimeout,
+    reason: `request_error${codeForReason ? `_${codeForReason}` : ""}: ${message}`,
     httpStatus: null,
     contentType: null,
     terminalStatus: "FAILED"

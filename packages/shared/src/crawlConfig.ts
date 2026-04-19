@@ -21,8 +21,8 @@ function readInt(name: string, fallback: number): number {
 }
 
 export const DEFAULT_CRAWL_RUN_CONFIG: CrawlRunConfig = {
-  maxPages: readInt("CRAWL_MAX_PAGES", 1000),
-  maxDepth: readInt("CRAWL_MAX_DEPTH", 5),
+  maxPages: readInt("CRAWL_MAX_PAGES", 5000),
+  maxDepth: readInt("CRAWL_MAX_DEPTH", 25),
   scopeMode: (process.env.CRAWL_SCOPE_MODE === "same_domain" ? "same_domain" : "same_host"),
   includeDocuments: process.env.CRAWL_INCLUDE_DOCUMENTS === "1",
   followRedirects: process.env.CRAWL_FOLLOW_REDIRECTS === "1",

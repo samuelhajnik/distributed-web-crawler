@@ -53,15 +53,13 @@ let urlsTableOffset = 0;
 const URL_TABLE_LIMIT = 200;
 /** Rows/edges fetched for lineage graph construction (aligned with GET /graph limit). */
 const GRAPH_URL_LIMIT = 50000;
-/** Above this size, UI switches to lower-cost graph rendering behavior. */
-const LARGE_GRAPH_NODE_THRESHOLD = 900;
-const LARGE_GRAPH_POLL_MS = 6000;
 
 /** Auto-fit viewport on growth until the user pans/zooms; “Fit graph” re-enables. */
 let graphAutoFitEnabled = true;
 let lastRenderedGraphNodeCount = 0;
 let lastRenderedGraphEdgeCount = 0;
-let graphLargeModeActive = false;
+/** COMPLETED/FAILED: graph-view freezes physics/hover for a static final picture. */
+let graphRunTerminal = false;
 
 const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo, {
   onUserViewportInteraction: () => {
@@ -71,14 +69,6 @@ const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo, {
 
 /** Deterministic snapshot of UI-relevant graph content for comparing polls. */
 function buildGraphSignature(model) {
-  if (model.nodeCount >= LARGE_GRAPH_NODE_THRESHOLD) {
-    // Large-graph mode: avoid O(n log n) sorting each poll.
-    const nodePart = model.nodes
-      .map((n) => `${String(n.id)}:${n.color?.background ?? ""}:${n.color?.border ?? ""}`)
-      .join("|");
-    const edgePart = model.edges.map((e) => `${String(e.from)}>${String(e.to)}`).join("|");
-    return `${model.nodeCount}/${model.edgeCount}/${nodePart}/${edgePart}`;
-  }
   const nodeLines = model.nodes
     .map((n) =>
       JSON.stringify({
@@ -256,7 +246,6 @@ function renderGraph(snapshot) {
     lastRenderedGraphEdgeCount = 0;
     el.graphMeta.textContent = "No active crawl.";
     el.graphWarn.textContent = "";
-    graphLargeModeActive = false;
     graphView.clear("Click a node for details.");
     return;
   }
@@ -267,30 +256,18 @@ function renderGraph(snapshot) {
     lastRenderedGraphEdgeCount = 0;
     el.graphMeta.textContent = "No URLs yet.";
     el.graphWarn.textContent = snapshot.graphError ? String(snapshot.graphError) : "";
-    graphLargeModeActive = false;
     graphView.clear("Click a node for details.");
     return;
   }
 
   const model = buildLineageGraph(snapshot.urls, snapshot.graph);
   el.graphMeta.textContent = `${model.nodeCount.toLocaleString()} nodes · ${model.edgeCount.toLocaleString()} edges`;
-  const largeModeNow = model.nodeCount >= LARGE_GRAPH_NODE_THRESHOLD;
-  const enteredLargeMode = !graphLargeModeActive && largeModeNow;
-  if (largeModeNow !== graphLargeModeActive) {
-    graphLargeModeActive = largeModeNow;
-    graphView.setLargeGraphMode(largeModeNow);
-    // Slow graph poll cadence for large runs to keep UI responsive.
-    const sliderMs = Number(el.graphRefreshSlider.value) * 1000;
-    graphPoller.setPollInterval(largeModeNow ? Math.max(sliderMs, LARGE_GRAPH_POLL_MS) : sliderMs);
-  }
-  const baseWarn = snapshot.graphError ? `Incomplete graph data: ${snapshot.graphError}` : "";
-  const perfWarn = largeModeNow ? "Large graph mode: reduced auto-layout for performance." : "";
-  el.graphWarn.textContent = [baseWarn, perfWarn].filter(Boolean).join(" ");
+  el.graphWarn.textContent = snapshot.graphError ? `Incomplete graph data: ${snapshot.graphError}` : "";
 
   const signature = buildGraphSignature(model);
   if (signature !== lastGraphSignature) {
     graphView.render(model);
-    if (!largeModeNow) {
+    if (!graphRunTerminal) {
       graphView.resumeLayout();
     }
     lastGraphSignature = signature;
@@ -298,19 +275,14 @@ function renderGraph(snapshot) {
     const grew =
       model.nodeCount > lastRenderedGraphNodeCount || model.edgeCount > lastRenderedGraphEdgeCount;
     if (graphAutoFitEnabled && grew) {
-      if (largeModeNow) {
-        // Skip repeated viewport shifts for very large graphs.
-        if (enteredLargeMode || lastRenderedGraphNodeCount === 0) {
-          graphView.fitSoon({ delayMs: 450, duration: 260 });
-        }
-      } else {
-        graphView.fitSoon({ delayMs: 350 });
-      }
+      graphView.fitSoon({ delayMs: 350 });
     }
 
     lastRenderedGraphNodeCount = model.nodeCount;
     lastRenderedGraphEdgeCount = model.edgeCount;
   }
+
+  graphView.setCompletedMode(graphRunTerminal);
 
   if (!el.graphNodeInfo.textContent || el.graphNodeInfo.textContent.includes("Click a node")) {
     const root = urlsRows.find((r) => r.discovered_from_url_id == null) ?? urlsRows[0];
@@ -338,6 +310,7 @@ function applyMainSnapshot(snapshot) {
   setPollStatus(`Polling run ${activeRunId}...`);
   const status = String(snapshot.summary?.status ?? "").toUpperCase();
   if (status === "COMPLETED" || status === "FAILED") {
+    graphRunTerminal = true;
     graphPoller.stop();
     void fetchGraphSnapshot(activeRunId).then((s) => renderGraph(s));
     setPollStatus(`Run ${activeRunId} is ${status}. Polling stopped.`);
@@ -379,14 +352,73 @@ const poller = createRunPoller(
 
 el.graphRefreshSlider.addEventListener("input", () => {
   syncGraphRefreshLabel();
-  const sliderMs = Number(el.graphRefreshSlider.value) * 1000;
-  graphPoller.setPollInterval(graphLargeModeActive ? Math.max(sliderMs, LARGE_GRAPH_POLL_MS) : sliderMs);
+  graphPoller.setPollInterval(Number(el.graphRefreshSlider.value) * 1000);
 });
 syncGraphRefreshLabel();
 
 el.graphFitBtn.addEventListener("click", () => {
   graphAutoFitEnabled = true;
   graphView.fit();
+});
+
+/** Debounce coalesces visibility + focus + pageshow when returning to the tab/window. */
+let tabReturnDebounceTimer = null;
+const TAB_RETURN_DEBOUNCE_MS = 180;
+
+/**
+ * Nudge vis-network physics after fresh data while the crawl is active (skipped for completed/static graph).
+ */
+function wakeGraphIfAppropriate() {
+  if (!activeRunId) {
+    return;
+  }
+  const { nodeCount } = graphView.getCounts();
+  if (nodeCount === 0) {
+    return;
+  }
+  if (typeof graphView.isCompletedMode === "function" && graphView.isCompletedMode()) {
+    return;
+  }
+  graphView.wakeFromBackgroundStrong();
+}
+
+/**
+ * Background tabs throttle setInterval/requestAnimationFrame — polling lags until the next tick.
+ * Force immediate main + graph fetches, then wake layout (physics only matters in normal mode).
+ */
+async function runTabReturnRefresh() {
+  if (!activeRunId || document.visibilityState !== "visible") {
+    return;
+  }
+  await Promise.all([poller.triggerNow(), graphPoller.triggerNow()]);
+  requestAnimationFrame(() => {
+    wakeGraphIfAppropriate();
+  });
+}
+
+function scheduleTabReturnRefresh() {
+  if (document.visibilityState !== "visible") {
+    return;
+  }
+  if (tabReturnDebounceTimer !== null) {
+    clearTimeout(tabReturnDebounceTimer);
+  }
+  tabReturnDebounceTimer = setTimeout(() => {
+    tabReturnDebounceTimer = null;
+    void runTabReturnRefresh();
+  }, TAB_RETURN_DEBOUNCE_MS);
+}
+
+document.addEventListener("visibilitychange", () => {
+  scheduleTabReturnRefresh();
+});
+
+window.addEventListener("focus", () => {
+  scheduleTabReturnRefresh();
+});
+
+window.addEventListener("pageshow", () => {
+  scheduleTabReturnRefresh();
 });
 
 el.urlsPrev.addEventListener("click", () => {
@@ -427,11 +459,11 @@ el.form.addEventListener("submit", async (ev) => {
   el.startStatus.className = "muted";
   try {
     const run = await startCrawl(seedUrl, settings);
+    graphRunTerminal = false;
     lastGraphSignature = null;
     graphAutoFitEnabled = true;
     lastRenderedGraphNodeCount = 0;
     lastRenderedGraphEdgeCount = 0;
-    graphLargeModeActive = false;
     urlsTableOffset = 0;
     activeRunId = Number(run.id);
     el.urlsPageStatus.textContent = "";

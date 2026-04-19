@@ -34,7 +34,6 @@ export const RECONCILE_INTERVAL_SECONDS = Number(process.env.RECONCILE_INTERVAL_
 export const RECONCILE_BATCH_SIZE = Number(process.env.RECONCILE_BATCH_SIZE ?? 500);
 export const RETRY_BASE_DELAY_MS = Number(process.env.RETRY_BASE_DELAY_MS ?? 1000);
 export const RETRY_MAX_DELAY_MS = Number(process.env.RETRY_MAX_DELAY_MS ?? 30000);
-export const RETRY_429_MULTIPLIER = Number(process.env.RETRY_429_MULTIPLIER ?? 4);
 export const CRAWL_QUEUE_NAME = "crawl-queue";
 
 export const pgPool = new Pool({

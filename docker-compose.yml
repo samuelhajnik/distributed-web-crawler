@@ -63,7 +63,6 @@ services:
       MAX_RETRIES: 2
       RETRY_BASE_DELAY_MS: 1000
       RETRY_MAX_DELAY_MS: 30000
-      RETRY_429_MULTIPLIER: 4
       WORKER_METRICS_PORT: 9091
     depends_on:
       postgres:

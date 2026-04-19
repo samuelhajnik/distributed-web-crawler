@@ -13,7 +13,6 @@ import {
   type CrawlRunConfig,
   createCrawlQueue,
   pgPool,
-  RETRY_429_MULTIPLIER,
   RETRY_BASE_DELAY_MS,
   RETRY_MAX_DELAY_MS,
   redisConnection
@@ -26,6 +25,12 @@ import {
   readWorkerEnvInt
 } from "./concurrencyConfig";
 import { createFetchGateway } from "./fetchLimit";
+import {
+  loadHostCooldownFromEnv,
+  shouldCooldownForExecutionClassification,
+  shouldCooldownForHttpClassification
+} from "./hostCooldown";
+import { loadHostPacerFromEnv } from "./hostPacer";
 import {
   crawlFetchDurationSeconds,
   crawlProcessingDurationSeconds,
@@ -45,6 +50,21 @@ const fetchPerHostMax = readWorkerEnvInt("FETCH_CONCURRENCY_PER_HOST", DEFAULT_F
 const workerId = process.env.WORKER_ID ?? `${os.hostname()}-${process.pid}`;
 const metricsPort = Number(process.env.WORKER_METRICS_PORT ?? 9091);
 const queue = createCrawlQueue();
+
+/** Honest product id in a common UA shape; avoids mimicking a specific browser build. */
+const DEFAULT_REQUEST_USER_AGENT =
+  "Mozilla/5.0 (compatible; distributed-web-crawler/1.0)";
+const REQUEST_USER_AGENT = process.env.CRAWLER_USER_AGENT?.trim() || DEFAULT_REQUEST_USER_AGENT;
+
+/** Shared defaults for document-style GETs (undici fetch + request; redirect-following fetch reuses the same options). */
+function buildRequestHeaders(): Record<string, string> {
+  return {
+    "user-agent": REQUEST_USER_AGENT,
+    accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.9"
+  };
+}
 
 const runContextCache = new Map<number, { value: RunContext; until: number }>();
 const RUN_CONTEXT_TTL_MS = 60_000;
@@ -139,6 +159,12 @@ async function getRunContext(crawlRunId: number): Promise<RunContext> {
 }
 
 const fetchGateway = createFetchGateway(fetchGlobalMax, fetchPerHostMax);
+const { pacer: hostPacer, minGapMs: fetchMinGapPerHostMs, jitterMaxMs: fetchGapJitterMs } = loadHostPacerFromEnv();
+const {
+  cooldown: hostCooldown,
+  baseBackoffMs: fetchHostCooldownBaseMs,
+  maxBackoffMs: fetchHostCooldownMaxMs
+} = loadHostCooldownFromEnv();
 
 type ClaimedUrl = {
   id: number;
@@ -322,7 +348,7 @@ async function markFailedOrRetryFromResponse(
   contentType: string | null,
   maxRetries: number
 ): Promise<void> {
-  const classification = classifyHttpResponse(statusCode, contentType, RETRY_429_MULTIPLIER);
+  const classification = classifyHttpResponse(statusCode, contentType);
   if (classification.reason === "success") {
     return;
   }
@@ -429,6 +455,8 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
     return;
   }
 
+  const fetchHost = new URL(claimed.normalized_url).hostname;
+
   const processingTimer = crawlProcessingDurationSeconds.startTimer();
   try {
     const runContext = await getRunContext(claimed.crawl_run_id);
@@ -436,6 +464,9 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
     if (runContext.config.demoDelayMs > 0) {
       await new Promise((r) => setTimeout(r, runContext.config.demoDelayMs));
     }
+
+    await hostCooldown.waitUntilCool(fetchHost);
+    await hostPacer.waitBeforeOutboundFetch(fetchHost);
 
     const ac = new AbortController();
     const timeoutHandle = setTimeout(() => ac.abort(), runContext.config.requestTimeoutMs);
@@ -448,9 +479,7 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
         const response = await fetchGateway.run(claimed.normalized_url, () =>
           undiciFetch(claimed.normalized_url, {
             method: "GET",
-            headers: {
-              "user-agent": "distributed-web-crawler/1.0"
-            },
+            headers: buildRequestHeaders(),
             signal: ac.signal,
             redirect: "follow"
           })
@@ -462,9 +491,7 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
         const response = await fetchGateway.run(claimed.normalized_url, () =>
           request(claimed.normalized_url, {
             method: "GET",
-            headers: {
-              "user-agent": "distributed-web-crawler/1.0"
-            },
+            headers: buildRequestHeaders(),
             signal: ac.signal
           })
         );
@@ -483,8 +510,11 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
       `fetch-result status_code=${statusCode} content_type="${contentType ?? ""}"`
     );
 
-    const responseClass = classifyHttpResponse(statusCode, contentType, RETRY_429_MULTIPLIER);
+    const responseClass = classifyHttpResponse(statusCode, contentType);
     if (responseClass.reason !== "success") {
+      if (shouldCooldownForHttpClassification(responseClass)) {
+        await hostCooldown.recordNegative(fetchHost);
+      }
       await markFailedOrRetryFromResponse(
         claimed.crawl_run_id,
         claimed.id,
@@ -496,6 +526,8 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
       return;
     }
 
+    await hostCooldown.recordSuccess(fetchHost);
+
     if (!String(contentType ?? "").toLowerCase().includes("text/html")) {
       await markVisited(claimed.crawl_run_id, claimed.id, statusCode, contentType);
       return;
@@ -505,6 +537,10 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
     try {
       html = await readBodyText();
     } catch (err) {
+      const execClass = classifyExecutionError(err);
+      if (shouldCooldownForExecutionClassification(execClass)) {
+        await hostCooldown.recordNegative(fetchHost);
+      }
       await markFailedOrRetryFromError(
         claimed.crawl_run_id,
         claimed.id,
@@ -551,6 +587,10 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
     );
   } catch (err) {
     const runContext = await getRunContext(claimed.crawl_run_id);
+    const execClass = classifyExecutionError(err);
+    if (shouldCooldownForExecutionClassification(execClass)) {
+      await hostCooldown.recordNegative(fetchHost);
+    }
     await markFailedOrRetryFromError(
       claimed.crawl_run_id,
       claimed.id,
@@ -597,7 +637,7 @@ http
   });
 
 process.stdout.write(
-  `[component=worker worker_id=${workerId}] started bullmq_concurrency=${workerConcurrency} fetch_concurrency=${fetchGlobalMax} fetch_per_host=${fetchPerHostMax}\n`
+  `[component=worker worker_id=${workerId}] started bullmq_concurrency=${workerConcurrency} fetch_concurrency=${fetchGlobalMax} fetch_per_host=${fetchPerHostMax} fetch_min_gap_per_host_ms=${fetchMinGapPerHostMs} fetch_gap_jitter_ms=${fetchGapJitterMs} fetch_host_cooldown_base_ms=${fetchHostCooldownBaseMs} fetch_host_cooldown_max_ms=${fetchHostCooldownMaxMs}\n`
 );
 
 process.on("SIGINT", async () => {

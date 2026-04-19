@@ -79,7 +79,9 @@ Reviewers can verify these properties using the export/summary APIs, the E2E fix
 
 - This implementation is not a web-scale crawler and is intended for local/demo/review environments.
 - No JavaScript rendering pipeline; responses are fetched as HTTP documents and parsed with Cheerio.
-- No robots.txt / crawl-delay / advanced distributed politeness scheduler.
+- Workers use simple **browser-like default HTTP headers** on outbound fetches (`User-Agent`, `Accept`, `Accept-Language`; encoding negotiation is left to the HTTP stack). Set **`CRAWLER_USER_AGENT`** to override the default User-Agent string.
+- No **robots.txt** support and no advanced **distributed/global** politeness scheduler.
+- The worker does include **lightweight, process-local** host pacing/cooldown (spacing and backoff per hostname within one process) for live-site stability — not a crawl-delay engine and not coordinated across replicas.
 - URL normalization is intentionally conservative and documented in this README.
 - Host scope is intentionally narrow per run (`seed host` plus optional `www` counterpart only).
 - Correctness properties are relative to the documented normalization and allowed-host rules.
@@ -128,7 +130,8 @@ See [docs/architecture.md](docs/architecture.md) for a URL state machine, data m
 - **301**: terminal `REDIRECT_301`.
 - **403**: terminal `FORBIDDEN` (request completed; access denied by target).
 - **404**: terminal `NOT_FOUND`.
-- **Other non-2xx HTTP responses (including 401/410/429/5xx)**: terminal `HTTP_TERMINAL`.
+- **5xx**: **retryable** first (re-queued with backoff up to `MAX_RETRIES`); when retries are exhausted, terminal `HTTP_TERMINAL`.
+- **Other non-2xx HTTP responses** (e.g. **401**, **410**, **429**, and other **3xx/4xx** not listed above): terminal `HTTP_TERMINAL`.
 - **Crawler-side failures (DNS/connect/timeouts without valid HTTP response, runtime/parser errors)**: `FAILED` (retryable when classified transient; bounded by `MAX_RETRIES`).
 
 ### Completion detection
@@ -173,7 +176,7 @@ The lineage graph is most useful while the crawl is still active, because the di
 
 Per-run settings from the UI/API are merged with **control-plane env defaults** for any omitted fields, then persisted on `crawl_runs.run_config` (`maxPages`, `maxDepth`, `scopeMode`, `includeDocuments`, `followRedirects`, `demoDelayMs`, `requestTimeoutMs`, `maxRetries`).
 
-**Concurrency is process-level, not per run.** Workers use **environment variables** (`WORKER_CONCURRENCY`, `FETCH_CONCURRENCY`, `FETCH_CONCURRENCY_PER_HOST`) at deploy time, not `run_config`.
+**Concurrency is process-level, not per run.** Workers read **environment variables** at deploy time (not `run_config`): **`WORKER_CONCURRENCY`**, **`FETCH_CONCURRENCY`**, **`FETCH_CONCURRENCY_PER_HOST`**, plus lightweight host pacing/cooldown (**`FETCH_MIN_GAP_PER_HOST_MS`**, **`FETCH_GAP_JITTER_MS`**, **`FETCH_HOST_COOLDOWN_BASE_MS`**, **`FETCH_HOST_COOLDOWN_MAX_MS`**). Defaults and behavior are documented under **Fetch concurrency / politeness**.
 
 This UI remains lightweight and demo-focused; the polling layer can be swapped for SSE later without a large rewrite.
 
@@ -244,8 +247,8 @@ curl -sS -X POST http://localhost:3000/crawl-runs \
   -d '{
     "seedUrl":"https://example.com/",
     "settings":{
-      "maxPages":300,
-      "maxDepth":4,
+      "maxPages":5000,
+      "maxDepth":25,
       "scopeMode":"same_host",
       "includeDocuments":false,
       "followRedirects":true,
@@ -381,17 +384,25 @@ npm run dev:control-plane
 npm run dev:worker
 ```
 
-Worker metrics server listens on `WORKER_METRICS_PORT` (default `9091`). Parallel BullMQ jobs and outbound HTTP caps use `WORKER_CONCURRENCY` / `FETCH_CONCURRENCY` / `FETCH_CONCURRENCY_PER_HOST` — see **Fetch concurrency / politeness** for defaults (override via env before `npm run dev:worker`).
+Worker metrics server listens on `WORKER_METRICS_PORT` (default `9091`). Parallel BullMQ jobs, outbound HTTP caps, per-host pacing, and optional host cooldown use `WORKER_CONCURRENCY` / `FETCH_CONCURRENCY` / `FETCH_CONCURRENCY_PER_HOST` / `FETCH_MIN_GAP_PER_HOST_MS` / `FETCH_GAP_JITTER_MS` / `FETCH_HOST_COOLDOWN_*` — see **Fetch concurrency / politeness** for defaults (override via env before `npm run dev:worker`).
 
 ## Fetch concurrency / politeness (lightweight)
 
-Workers use three **independent** process-level knobs (set via environment when you start the worker binary; defaults are defined in `services/worker/src/concurrencyConfig.ts`):
+Workers use several **independent** process-level knobs (set via environment when you start the worker binary; defaults are defined in `services/worker/src/concurrencyConfig.ts`):
 
 | Variable | Role | Default | Trade-off |
 |----------|------|---------|-----------|
 | `WORKER_CONCURRENCY` | BullMQ: how many URL jobs run concurrently in this process | **8** | More jobs in flight → faster frontier drain and more parallel DB/network work; too high can overload the worker or the origin. |
 | `FETCH_CONCURRENCY` | Global in-process cap on concurrent HTTP attempts (across those jobs) | **12** | Separates “queue concurrency” from “socket concurrency”; raises ceiling for link-rich pages without necessarily opening more TCP connections than this cap. |
 | `FETCH_CONCURRENCY_PER_HOST` | Per-hostname cap within this process | **4** | Reduces accidental burst load on a single origin; still not a distributed politeness layer. |
+| `FETCH_MIN_GAP_PER_HOST_MS` | Minimum spacing between **scheduled starts** of outbound requests to the same hostname (plus jitter), before fetch concurrency gates | **40** | Demo-friendly smoothing on one origin; **process-local only**. Set to **0** to disable the gap (jitter-only still applies if `FETCH_GAP_JITTER_MS` is greater than zero). |
+| `FETCH_GAP_JITTER_MS` | Random extra delay **0…N ms** sampled per paced request. If min gap is also enabled, jitter is **capped at that min gap** so it rarely doubles the enforced spacing. | **25** | Adds light spread; **0** for deterministic spacing only. |
+| `FETCH_HOST_COOLDOWN_BASE_MS` | After deny/rate-limit/transient-server signals (403/429/retryable 5xx), extra per-host delay before new requests start; backoff doubles each repeat up to **MAX** | **500** | **Process-local only** (not coordinated across replicas). Set to **0** to disable. Applies before pacing. |
+| `FETCH_HOST_COOLDOWN_MAX_MS` | Upper bound for each cooldown extension | **30000** | Keeps backoff bounded; tune with BASE for stricter/softer reactions. |
+
+Per-host pacing applies only at **outbound fetch scheduling** time. It does **not** replace run-level **`demoDelayMs`** (demo-wide coarse slowdown across all URLs), which remains separate.
+
+The worker also maintains a light **host cooldown**: repeated **403**, **429**, retryable **5xx**, or retryable transport errors temporarily extend a per-host wait layered **before** min-gap pacing. Successful HTTP responses decrement the host’s strike count over time so pressure can decay without a separate timer.
 
 Together these defaults aim for **practical demo and dev throughput** while staying bounded—more responsive than ultra-conservative throttling, but not uncontrolled parallelism.
 

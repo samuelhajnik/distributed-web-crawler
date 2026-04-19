@@ -7,7 +7,8 @@
     "services/*"
   ],
   "scripts": {
-    "test": "npm run test -w @crawler/shared",
+    "prepare": "npm run build -w @crawler/shared",
+    "test": "npm run test -w @crawler/shared && npm run test -w worker",
     "test:e2e": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts",
     "test:e2e:generated": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts tests/e2e/generated-graph.test.ts",
     "test:e2e:fixed": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts tests/e2e/fixed-fixtures.test.ts",

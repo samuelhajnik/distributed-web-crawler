@@ -9,6 +9,12 @@ export function createRunPoller(fetchTick, onData, onError, initialIntervalMs = 
   let currentRunId = null;
   let pollEveryMs = initialIntervalMs;
   let stopped = true;
+  /** True while fetchTick/onData for this tick are running. */
+  let tickInFlight = false;
+  /** Another tick was requested while one was running (triggerNow or overlapping tick). */
+  let queuedImmediateTick = false;
+  /** Resolvers for pending triggerNow() calls; flushed after the relevant tick completes. */
+  let pendingTriggerCompletes = [];
 
   function clearSchedule() {
     if (timeoutHandle !== null) {
@@ -17,11 +23,22 @@ export function createRunPoller(fetchTick, onData, onError, initialIntervalMs = 
     }
   }
 
+  function flushTriggerCompletes() {
+    const completes = pendingTriggerCompletes.splice(0);
+    completes.forEach((fn) => fn());
+  }
+
   async function tick() {
     if (stopped || currentRunId == null) {
       return;
     }
+    if (tickInFlight) {
+      queuedImmediateTick = true;
+      return;
+    }
     const runIdAtTickStart = currentRunId;
+    tickInFlight = true;
+    let chainImmediate = false;
     try {
       const snapshot = await fetchTick(runIdAtTickStart);
       if (stopped || currentRunId == null || currentRunId !== runIdAtTickStart) {
@@ -38,11 +55,43 @@ export function createRunPoller(fetchTick, onData, onError, initialIntervalMs = 
         onError(err);
       }
     } finally {
+      tickInFlight = false;
+      chainImmediate = queuedImmediateTick;
+      queuedImmediateTick = false;
+
       if (!stopped && currentRunId != null) {
         clearSchedule();
-        timeoutHandle = setTimeout(() => void tick(), pollEveryMs);
+        if (chainImmediate) {
+          timeoutHandle = setTimeout(() => void tick(), 0);
+        } else {
+          flushTriggerCompletes();
+          timeoutHandle = setTimeout(() => void tick(), pollEveryMs);
+        }
+      } else {
+        flushTriggerCompletes();
       }
     }
+  }
+
+  /**
+   * Run one poll immediately (coalesced with in-flight work). Resolves when the fetch that
+   * satisfies this refresh has finished (including onData). Does not reject on fetch errors
+   * (onError runs instead). No-op if stopped or no active run.
+   */
+  function triggerNow() {
+    return new Promise((resolve) => {
+      if (stopped || currentRunId == null) {
+        resolve();
+        return;
+      }
+      pendingTriggerCompletes.push(resolve);
+      if (tickInFlight) {
+        queuedImmediateTick = true;
+        return;
+      }
+      clearSchedule();
+      void tick();
+    });
   }
 
   function start(runId) {
@@ -55,6 +104,7 @@ export function createRunPoller(fetchTick, onData, onError, initialIntervalMs = 
   function stop() {
     stopped = true;
     clearSchedule();
+    flushTriggerCompletes();
   }
 
   /** Apply a new interval; reschedules only if a wait between ticks is already queued (not mid-tick). */
@@ -66,5 +116,5 @@ export function createRunPoller(fetchTick, onData, onError, initialIntervalMs = 
     }
   }
 
-  return { start, stop, setPollInterval };
+  return { start, stop, setPollInterval, triggerNow };
 }

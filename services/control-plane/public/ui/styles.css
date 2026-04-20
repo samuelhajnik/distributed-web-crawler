@@ -432,34 +432,55 @@ button:disabled {
   flex: 1 1 auto;
   justify-content: flex-end;
   align-items: center;
-  gap: 1rem 1.25rem;
+  gap: 0.5rem 0.85rem;
   min-width: 0;
 }
 
 .graph-refresh-control {
   display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  flex: 1 1 auto;
-  min-width: 180px;
-  max-width: min(280px, 100%);
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .graph-refresh-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
   font-size: 0.78rem;
   font-weight: 500;
   color: #444;
+  white-space: nowrap;
 }
 
 #graph-refresh-slider {
-  width: 100%;
-  min-width: 0;
+  width: 170px;
+  min-width: 140px;
+  max-width: 220px;
 }
 
 .graph-fit-btn {
   flex: 0 0 auto;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.graph-auto-center-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  color: #444;
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1;
+  margin: 0;
+}
+
+.graph-auto-center-control input {
+  margin: 0;
 }
 
 .graph-legend {

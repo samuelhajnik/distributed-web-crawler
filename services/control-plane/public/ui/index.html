@@ -135,7 +135,7 @@
             <div class="panel-toolbar-right graph-controls">
               <div class="graph-refresh-control">
                 <label class="graph-refresh-label" for="graph-refresh-slider">
-                  Refresh <span id="graph-refresh-value">3s</span>
+                  Refresh: <span id="graph-refresh-value">3s</span>
                 </label>
                 <input
                   id="graph-refresh-slider"
@@ -150,6 +150,10 @@
                   aria-label="Graph refresh interval in seconds"
                 />
               </div>
+              <label class="graph-auto-center-control" for="graph-auto-center-toggle">
+                <input id="graph-auto-center-toggle" type="checkbox" checked />
+                <span>Auto-center</span>
+              </label>
               <button id="graph-fit-btn" type="button" class="btn-secondary graph-fit-btn">Fit graph</button>
             </div>
           </div>

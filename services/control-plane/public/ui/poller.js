@@ -44,7 +44,7 @@ export function createRunPoller(fetchTick, onData, onError, initialIntervalMs = 
       if (stopped || currentRunId == null || currentRunId !== runIdAtTickStart) {
         return;
       }
-      onData(snapshot);
+      await Promise.resolve(onData(snapshot));
       const status = String(snapshot?.summary?.status ?? "").toUpperCase();
       if (status === "COMPLETED" || status === "FAILED") {
         stop();

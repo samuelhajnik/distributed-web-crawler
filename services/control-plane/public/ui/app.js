@@ -37,6 +37,7 @@ const el = {
   urlsLoading: document.getElementById("urls-loading"),
   graphRefreshSlider: document.getElementById("graph-refresh-slider"),
   graphRefreshValue: document.getElementById("graph-refresh-value"),
+  graphAutoCenterToggle: document.getElementById("graph-auto-center-toggle"),
   graphFitBtn: document.getElementById("graph-fit-btn"),
   graphPanelDetails: document.getElementById("graph-panel-details"),
   urlsPrev: document.getElementById("urls-prev"),
@@ -55,16 +56,19 @@ const URL_TABLE_LIMIT = 200;
 /** Rows/edges fetched for lineage graph construction (aligned with GET /graph limit). */
 const GRAPH_URL_LIMIT = 50000;
 
-/** Auto-fit viewport on growth until the user pans/zooms; “Fit graph” re-enables. */
-let graphAutoFitEnabled = true;
 let lastRenderedGraphNodeCount = 0;
 let lastRenderedGraphEdgeCount = 0;
 /** COMPLETED/FAILED: graph-view freezes physics/hover for a static final picture. */
 let graphRunTerminal = false;
+let graphTerminalFinalized = false;
+let graphTerminalFinalizationInProgress = false;
+/** True only while graph subsystem is intentionally paused due to hidden-tab lifecycle. */
+let graphPausedForHiddenTab = false;
 
 const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo, {
-  onUserViewportInteraction: () => {
-    graphAutoFitEnabled = false;
+  // Real user navigation disables auto-zoom so the app stops fighting user-controlled viewport.
+  onAutoZoomChange: (enabled) => {
+    el.graphAutoCenterToggle.checked = enabled;
   }
 });
 
@@ -240,7 +244,8 @@ function escapeHtml(text) {
     .replaceAll('"', "&quot;");
 }
 
-function renderGraph(snapshot) {
+function renderGraph(snapshot, options = {}) {
+  const { forceRefresh = false, suppressAutoFit = false } = options;
   if (!activeRunId) {
     lastGraphSignature = null;
     lastRenderedGraphNodeCount = 0;
@@ -269,24 +274,29 @@ function renderGraph(snapshot) {
   el.graphWarn.textContent = snapshot.graphError ? `Incomplete graph data: ${snapshot.graphError}` : "";
 
   const signature = buildGraphSignature(model);
-  if (signature !== lastGraphSignature) {
+  const shouldFreezeTerminalGraph = graphRunTerminal && graphTerminalFinalized;
+  graphView.setCompletedMode(shouldFreezeTerminalGraph);
+  const signatureChanged = signature !== lastGraphSignature;
+  if (forceRefresh) {
+    // Hidden-tab throttling can leave vis-network half-awake; force a full data/physics re-arm.
+    graphView.refreshFromModel(model, { fit: false });
+  } else if (signatureChanged) {
     graphView.render(model);
     if (!graphRunTerminal) {
       graphView.resumeLayout();
     }
-    lastGraphSignature = signature;
+  }
 
+  if (signatureChanged || forceRefresh) {
+    lastGraphSignature = signature;
     const grew =
       model.nodeCount > lastRenderedGraphNodeCount || model.edgeCount > lastRenderedGraphEdgeCount;
-    if (graphAutoFitEnabled && grew) {
+    if (!suppressAutoFit && graphView.isAutoZoomEnabled() && grew) {
       graphView.fitSoon({ delayMs: 350 });
     }
-
     lastRenderedGraphNodeCount = model.nodeCount;
     lastRenderedGraphEdgeCount = model.edgeCount;
   }
-
-  graphView.setCompletedMode(graphRunTerminal);
 
   if (!el.graphNodeInfo.textContent || el.graphNodeInfo.textContent.includes("Click a node")) {
     const root = urlsRows.find((r) => r.discovered_from_url_id == null) ?? urlsRows[0];
@@ -305,7 +315,78 @@ async function fetchMainSnapshot(crawlRunId) {
   return { summary, urls, urlsOffsetAtFetch: offsetAtFetch };
 }
 
-function applyMainSnapshot(snapshot) {
+/**
+ * Fetch once and paint the graph after the run is COMPLETED/FAILED.
+ * Caller must set `graphRunTerminal = true` (and stop graph poller) before calling so `renderGraph` applies static mode.
+ */
+async function fetchAndRenderTerminalGraph() {
+  if (!activeRunId) {
+    return;
+  }
+  const snap = await fetchGraphSnapshot(activeRunId);
+  renderGraph(snap);
+  if (!graphTerminalFinalized && !graphTerminalFinalizationInProgress) {
+    graphTerminalFinalizationInProgress = true;
+    try {
+      // Allow a bounded final settle phase before freezing completed graphs.
+      await graphView.finalizeCompletedLayout({ maxSettleMs: 1800, fit: false });
+      graphTerminalFinalized = true;
+      graphView.setCompletedMode(true);
+    } finally {
+      graphTerminalFinalizationInProgress = false;
+    }
+  }
+}
+
+function forceGraphRefresh(snapshot, options = {}) {
+  renderGraph(snapshot, { forceRefresh: true, suppressAutoFit: true, ...options });
+}
+
+/**
+ * Hidden tabs throttle animation/timers heavily; pause graph polling+physics instead of trying to keep
+ * a stale simulation alive in the background.
+ */
+function pauseGraphForHiddenTab() {
+  if (!activeRunId || !el.graphPanelDetails.open || graphRunTerminal || graphPausedForHiddenTab) {
+    return;
+  }
+  graphPoller.stop();
+  graphView.pauseForHiddenTab();
+  graphPausedForHiddenTab = true;
+}
+
+/**
+ * After tab restore, do one forced graph refresh, then restart normal graph polling.
+ * This is more reliable than repeated startSimulation nudges against a stale hidden-tab instance.
+ */
+async function resumeGraphAfterHiddenTab() {
+  if (!graphPausedForHiddenTab) {
+    return;
+  }
+  if (!activeRunId) {
+    graphPausedForHiddenTab = false;
+    return;
+  }
+  if (!el.graphPanelDetails.open) {
+    graphPausedForHiddenTab = false;
+    return;
+  }
+  if (graphRunTerminal) {
+    await fetchAndRenderTerminalGraph();
+    graphPausedForHiddenTab = false;
+    return;
+  }
+  try {
+    const snap = await fetchGraphSnapshot(activeRunId);
+    forceGraphRefresh(snap, { suppressAutoFit: true });
+    graphView.resumeAfterHiddenTab();
+  } finally {
+    graphPoller.start(activeRunId);
+    graphPausedForHiddenTab = false;
+  }
+}
+
+async function applyMainSnapshot(snapshot) {
   if (snapshot.urlsOffsetAtFetch !== urlsTableOffset) {
     return;
   }
@@ -314,9 +395,14 @@ function applyMainSnapshot(snapshot) {
   setPollStatus(`Polling run ${activeRunId}...`);
   const status = String(snapshot.summary?.status ?? "").toUpperCase();
   if (status === "COMPLETED" || status === "FAILED") {
+    if (!graphRunTerminal) {
+      graphTerminalFinalized = false;
+      graphTerminalFinalizationInProgress = false;
+    }
     graphRunTerminal = true;
+    graphPausedForHiddenTab = false;
     graphPoller.stop();
-    void fetchGraphSnapshot(activeRunId).then((s) => renderGraph(s));
+    await fetchAndRenderTerminalGraph();
     setPollStatus(`Run ${activeRunId} is ${status}. Polling stopped.`);
   }
 }
@@ -342,12 +428,13 @@ const graphPoller = createRunPoller(
   DEFAULT_GRAPH_REFRESH_SEC * 1000
 );
 
-function resumeGraphPollingAfterExpand() {
+async function resumeGraphPollingAfterExpand() {
   if (!activeRunId) {
     return;
   }
+  graphPausedForHiddenTab = false;
   if (graphRunTerminal) {
-    void fetchGraphSnapshot(activeRunId).then((snap) => renderGraph(snap));
+    await fetchAndRenderTerminalGraph();
     return;
   }
   graphPoller.start(activeRunId);
@@ -370,17 +457,22 @@ el.graphRefreshSlider.addEventListener("input", () => {
   graphPoller.setPollInterval(Number(el.graphRefreshSlider.value) * 1000);
 });
 syncGraphRefreshLabel();
+el.graphAutoCenterToggle.checked = graphView.isAutoZoomEnabled();
+el.graphAutoCenterToggle.addEventListener("change", () => {
+  // Toggle controls future automatic fits only; does not trigger immediate fit.
+  graphView.setAutoZoomEnabled(el.graphAutoCenterToggle.checked);
+});
 
 el.graphPanelDetails.addEventListener("toggle", () => {
   if (!el.graphPanelDetails.open) {
     graphPoller.stop();
     return;
   }
-  resumeGraphPollingAfterExpand();
+  void resumeGraphPollingAfterExpand();
 });
 
 el.graphFitBtn.addEventListener("click", () => {
-  graphAutoFitEnabled = true;
+  // Manual fit is independent from auto-zoom setting.
   graphView.fit();
 });
 
@@ -389,41 +481,15 @@ let tabReturnDebounceTimer = null;
 const TAB_RETURN_DEBOUNCE_MS = 180;
 
 /**
- * Nudge vis-network physics after fresh data while the crawl is active (skipped for completed/static graph).
- */
-function wakeGraphIfAppropriate() {
-  if (!activeRunId || !el.graphPanelDetails.open) {
-    return;
-  }
-  const { nodeCount } = graphView.getCounts();
-  if (nodeCount === 0) {
-    return;
-  }
-  if (typeof graphView.isCompletedMode === "function" && graphView.isCompletedMode()) {
-    return;
-  }
-  graphView.wakeFromBackgroundStrong();
-}
-
-/**
  * Background tabs throttle setInterval/requestAnimationFrame — polling lags until the next tick.
- * Force immediate main + graph fetches, then wake layout (physics only matters in normal mode).
+ * Force immediate main poll, then resume graph subsystem only if we actually paused while hidden.
  */
 async function runTabReturnRefresh() {
   if (!activeRunId || document.visibilityState !== "visible") {
     return;
   }
   await poller.triggerNow();
-  if (el.graphPanelDetails.open) {
-    if (graphRunTerminal) {
-      void fetchGraphSnapshot(activeRunId).then((snap) => renderGraph(snap));
-    } else {
-      await graphPoller.triggerNow();
-    }
-  }
-  requestAnimationFrame(() => {
-    wakeGraphIfAppropriate();
-  });
+  await resumeGraphAfterHiddenTab();
 }
 
 function scheduleTabReturnRefresh() {
@@ -440,6 +506,10 @@ function scheduleTabReturnRefresh() {
 }
 
 document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    pauseGraphForHiddenTab();
+    return;
+  }
   scheduleTabReturnRefresh();
 });
 
@@ -490,8 +560,11 @@ el.form.addEventListener("submit", async (ev) => {
   try {
     const run = await startCrawl(seedUrl, settings);
     graphRunTerminal = false;
+    graphTerminalFinalized = false;
+    graphTerminalFinalizationInProgress = false;
+    graphPausedForHiddenTab = false;
     lastGraphSignature = null;
-    graphAutoFitEnabled = true;
+    graphView.setAutoZoomEnabled(true);
     lastRenderedGraphNodeCount = 0;
     lastRenderedGraphEdgeCount = 0;
     urlsTableOffset = 0;

@@ -1,7 +1,5 @@
 # Distributed Web Crawler
 
-> **Status:** Work in progress — usable now, not final yet.
-
 This repository is a small distributed crawler built to explore a specific systems question: how to keep crawl state durable and inspectable while work is executed asynchronously across multiple workers.
 
 In this implementation, Postgres stores the canonical frontier, Redis/BullMQ handles job dispatch, and a control plane runs reconciliation plus stale-lease recovery. The scope is intentionally narrower than a full production crawler; the focus is on making concurrency and failure behavior explicit and testable.
@@ -27,7 +25,7 @@ flowchart LR
 
 ![Demo UI — completed crawl](docs/screenshots/demo-ui-lineage-graph.png)
 
-*Demo UI — completed crawl with lineage graph and URL inspection surfaces.*
+*Demo UI — completed crawl with interactive lineage graph and URL inspection surfaces.*
 
 ## What this repo demonstrates
 
@@ -149,7 +147,7 @@ After each maintenance cycle: recover stale → reconcile → read counts → up
 
 ## Demo UI
 
-The control plane serves a minimal browser UI at `http://localhost:3000/ui/`. It is intentionally **polling-based** (no server push): the client periodically fetches JSON and re-renders **run summary**, an interactive **lineage graph**, and a **paginated URL table** for inspection.
+The control plane serves a minimal browser UI at `http://localhost:3000/ui/`. It is intentionally **polling-based** (no server push): the client periodically fetches JSON and re-renders **run summary**, an interactive **lineage graph** with **node-level inspection**, and a **paginated URL table** for run exploration and verification.
 
 ![Demo UI — run summary](docs/screenshots/demo-ui-run-summary.png)
 
@@ -169,7 +167,11 @@ The lineage graph is most useful while the crawl is still active, because the di
 
 ![Demo UI — graph late](docs/screenshots/demo-ui-graph-large.png)
 
-*Late stage — a larger crawl makes the discovered lineage and outcome distribution much easier to inspect.*
+*Late stage — the graph captures the complete discovered structure of the run, including major branches and terminal results.*
+
+![Demo UI — node detail inspection](docs/screenshots/demo-ui-node-detail.png)
+
+*Graph node inspection — selecting a discovered URL reveals per-node metadata such as status, depth, parent lineage (`discovered_from_url_id`), retry count, and terminal error classification, while keeping the surrounding crawl structure visible.*
 
 ![Demo UI — URL table](docs/screenshots/demo-ui-urls-table.png)
 
@@ -185,11 +187,11 @@ This UI remains lightweight and demo-focused; the polling layer can be swapped f
 
 ## What reviewers can verify
 
-- Duplicate queue delivery does not create duplicate URL rows because dedup + atomic claim gates processing.
+- Duplicate queue delivery does not create duplicate URL rows because dedup + atomic claim gates processing, and URL lineage remains inspectable at node/table level in the UI.
 - Stale `IN_PROGRESS` work can be reclaimed through lease expiry and maintenance.
 - `QUEUED` rows missing from Redis are re-enqueued by reconciliation.
 - Multi-worker exports can be compared to single-worker exports under the same fixture/rules.
-- Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient queue emptiness.
+- Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient queue emptiness, while final per-URL outcomes stay directly inspectable in graph/node views and the table.
 
 ## Tests
 

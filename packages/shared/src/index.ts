@@ -10,6 +10,8 @@ export type UrlStatus =
   | "QUEUED"
   | "IN_PROGRESS"
   | "VISITED"
+  | "REDIRECT_FOLLOWED"
+  | "REDIRECT_OUT_OF_SCOPE"
   | "REDIRECT_301"
   | "FORBIDDEN"
   | "NOT_FOUND"

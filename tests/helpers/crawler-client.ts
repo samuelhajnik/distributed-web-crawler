@@ -9,6 +9,8 @@ export type SummaryResponse = {
   totals: {
     discovered: number;
     visited: number;
+    redirect_followed: number;
+    redirect_out_of_scope: number;
     redirect_301: number;
     forbidden: number;
     not_found: number;
@@ -20,8 +22,14 @@ export type SummaryResponse = {
 };
 
 export type ExportRow = {
+  id?: number;
   normalized_url: string;
   status: string;
+  http_status?: number | null;
+  requested_url?: string | null;
+  final_url?: string | null;
+  redirected?: boolean;
+  final_in_scope?: boolean;
 };
 
 export type ExportResponse = {
@@ -38,11 +46,11 @@ export async function healthCheck(): Promise<boolean> {
   }
 }
 
-export async function createCrawlRun(seedUrl: string): Promise<number> {
+export async function createCrawlRun(seedUrl: string, settings?: Record<string, unknown>): Promise<number> {
   const r = await fetch(`${crawlerApiBase()}/crawl-runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seedUrl })
+    body: JSON.stringify(settings ? { seedUrl, settings } : { seedUrl })
   });
   if (!r.ok) {
     const t = await r.text();

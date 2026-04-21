@@ -28,7 +28,7 @@ export const DEFAULT_FETCH_GAP_JITTER_MS = 25;
 /** First backoff step after a deny/rate-limit/transient-server signal (set to 0 to disable host cooldown). */
 export const DEFAULT_FETCH_HOST_COOLDOWN_BASE_MS = 500;
 /** Cap per cooldown extension (exponential backoff doubles until this ceiling). */
-export const DEFAULT_FETCH_HOST_COOLDOWN_MAX_MS = 30_000;
+export const DEFAULT_FETCH_HOST_COOLDOWN_MAX_MS = 5_000;
 
 export function readWorkerEnvInt(name: string, fallback: number, min = 1, max = 256): number {
   const raw = process.env[name];

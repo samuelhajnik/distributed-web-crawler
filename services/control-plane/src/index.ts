@@ -34,6 +34,8 @@ type RunCounts = {
   queued_count: number;
   in_progress_count: number;
   visited_count: number;
+  redirect_followed_count: number;
+  redirect_out_of_scope_count: number;
   redirect_301_count: number;
   forbidden_count: number;
   not_found_count: number;
@@ -124,6 +126,8 @@ async function getRunCounts(crawlRunId: number): Promise<RunCounts> {
         COUNT(*) FILTER (WHERE status = 'QUEUED')::int AS queued_count,
         COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS in_progress_count,
         COUNT(*) FILTER (WHERE status = 'VISITED')::int AS visited_count,
+        COUNT(*) FILTER (WHERE status = 'REDIRECT_FOLLOWED')::int AS redirect_followed_count,
+        COUNT(*) FILTER (WHERE status = 'REDIRECT_OUT_OF_SCOPE')::int AS redirect_out_of_scope_count,
         COUNT(*) FILTER (WHERE status = 'REDIRECT_301')::int AS redirect_301_count,
         COUNT(*) FILTER (WHERE status = 'FORBIDDEN')::int AS forbidden_count,
         COUNT(*) FILTER (WHERE status = 'NOT_FOUND')::int AS not_found_count,
@@ -360,14 +364,15 @@ app.get("/crawl-runs/:id/summary", async (req, res) => {
       SELECT
         COUNT(*)::int AS total_discovered,
         COUNT(*) FILTER (WHERE status = 'VISITED')::int AS total_visited,
+        COUNT(*) FILTER (WHERE status = 'REDIRECT_FOLLOWED')::int AS total_redirect_followed,
+        COUNT(*) FILTER (WHERE status = 'REDIRECT_OUT_OF_SCOPE')::int AS total_redirect_out_of_scope,
         COUNT(*) FILTER (WHERE status = 'REDIRECT_301')::int AS total_redirect_301,
         COUNT(*) FILTER (WHERE status = 'FORBIDDEN')::int AS total_forbidden,
         COUNT(*) FILTER (WHERE status = 'NOT_FOUND')::int AS total_not_found,
         COUNT(*) FILTER (WHERE status = 'HTTP_TERMINAL')::int AS total_http_terminal,
         COUNT(*) FILTER (WHERE status = 'FAILED')::int AS total_failed,
         COUNT(*) FILTER (WHERE status = 'QUEUED')::int AS total_queued,
-        COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS total_in_progress,
-        COALESCE(SUM(retry_count), 0)::int AS total_retries
+        COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS total_in_progress
       FROM crawl_urls
       WHERE crawl_run_id = $1
       `,
@@ -390,14 +395,15 @@ app.get("/crawl-runs/:id/summary", async (req, res) => {
       totals: {
         discovered: a.total_discovered,
         visited: a.total_visited,
+        redirect_followed: a.total_redirect_followed,
+        redirect_out_of_scope: a.total_redirect_out_of_scope,
         redirect_301: a.total_redirect_301,
         forbidden: a.total_forbidden,
         not_found: a.total_not_found,
         http_terminal: a.total_http_terminal,
         failed: a.total_failed,
         queued: a.total_queued,
-        in_progress: a.total_in_progress,
-        retries: a.total_retries
+        in_progress: a.total_in_progress
       }
     });
   } catch (err) {
@@ -429,7 +435,11 @@ app.get("/crawl-runs/:id/export", async (req, res) => {
         visited_at,
         raw_url,
         discovered_from_url_id,
-        depth
+        depth,
+        requested_url,
+        final_url,
+        redirected,
+        final_in_scope
       FROM crawl_urls
       WHERE crawl_run_id = $1
       ORDER BY id
@@ -440,7 +450,7 @@ app.get("/crawl-runs/:id/export", async (req, res) => {
 
     if (format === "csv") {
       const header =
-        "id,normalized_url,status,http_status,content_type,retry_count,claimed_by_worker,claimed_at,visited_at,raw_url,discovered_from_url_id,depth\n";
+        "id,normalized_url,status,http_status,content_type,retry_count,claimed_by_worker,claimed_at,visited_at,raw_url,discovered_from_url_id,depth,requested_url,final_url,redirected,final_in_scope\n";
       const lines = rows.rows.map((r) =>
         [
           r.id,
@@ -454,7 +464,11 @@ app.get("/crawl-runs/:id/export", async (req, res) => {
           r.visited_at ?? "",
           csvEscape(r.raw_url ?? ""),
           r.discovered_from_url_id ?? "",
-          r.depth ?? 0
+          r.depth ?? 0,
+          csvEscape(r.requested_url ?? ""),
+          csvEscape(r.final_url ?? ""),
+          r.redirected ?? false,
+          r.final_in_scope ?? true
         ].join(",")
       );
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -555,6 +569,8 @@ app.get("/crawl-runs/:id", async (req, res) => {
       run_config: publicRunConfig(run.run_config),
       visited_count: counts.visited_count,
       redirect_301_count: counts.redirect_301_count,
+      redirect_followed_count: counts.redirect_followed_count,
+      redirect_out_of_scope_count: counts.redirect_out_of_scope_count,
       forbidden_count: counts.forbidden_count,
       not_found_count: counts.not_found_count,
       http_terminal_count: counts.http_terminal_count,
@@ -589,6 +605,8 @@ app.get("/crawl-runs/:id/urls", async (req, res) => {
       "QUEUED",
       "IN_PROGRESS",
       "VISITED",
+      "REDIRECT_FOLLOWED",
+      "REDIRECT_OUT_OF_SCOPE",
       "REDIRECT_301",
       "FORBIDDEN",
       "NOT_FOUND",
@@ -632,7 +650,11 @@ app.get("/crawl-runs/:id/urls", async (req, res) => {
         claimed_by_worker,
         visited_at,
         last_error,
-        updated_at
+        updated_at,
+        requested_url,
+        final_url,
+        redirected,
+        final_in_scope
       FROM crawl_urls
       WHERE crawl_run_id = $1
         AND ($2::text IS NULL OR status = $2)

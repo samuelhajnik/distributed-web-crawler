@@ -405,7 +405,7 @@ Workers use several **independent** process-level knobs (set via environment whe
 | `FETCH_MIN_GAP_PER_HOST_MS` | Minimum spacing between **scheduled starts** of outbound requests to the same hostname (plus jitter), before fetch concurrency gates | **40** | Demo-friendly smoothing on one origin; **process-local only**. Set to **0** to disable the gap (jitter-only still applies if `FETCH_GAP_JITTER_MS` is greater than zero). |
 | `FETCH_GAP_JITTER_MS` | Random extra delay **0…N ms** sampled per paced request. If min gap is also enabled, jitter is **capped at that min gap** so it rarely doubles the enforced spacing. | **25** | Adds light spread; **0** for deterministic spacing only. |
 | `FETCH_HOST_COOLDOWN_BASE_MS` | After deny/rate-limit/transient-server signals (403/429/retryable 5xx), extra per-host delay before new requests start; backoff doubles each repeat up to **MAX** | **500** | **Process-local only** (not coordinated across replicas). Set to **0** to disable. Applies before pacing. |
-| `FETCH_HOST_COOLDOWN_MAX_MS` | Upper bound for each cooldown extension | **30000** | Keeps backoff bounded; tune with BASE for stricter/softer reactions. |
+| `FETCH_HOST_COOLDOWN_MAX_MS` | Upper bound for each cooldown extension | **5000** | Keeps backoff bounded; tune with BASE for stricter/softer reactions. |
 
 Per-host pacing applies only at **outbound fetch scheduling** time. It does **not** replace run-level **`demoDelayMs`** (demo-wide coarse slowdown across all URLs), which remains separate.
 

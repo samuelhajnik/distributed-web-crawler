@@ -11,6 +11,8 @@ export const GRAPH_NODE_PALETTE = {
   queued: { bg: "#9ca3af", borderDefault: "#6b7280" },
   inProgress: { bg: "#ea580c", borderDefault: "#c2410c" },
   redirect301: { bg: "#2563eb", borderDefault: "#1d4ed8" },
+  redirectFollowed: { bg: "#1d4ed8", borderDefault: "#1e40af" },
+  redirectOutOfScope: { bg: "#0f766e", borderDefault: "#115e59" },
   forbidden: { bg: "#facc15", borderDefault: "#eab308" },
   notFound: { bg: "#0369a1", borderDefault: "#075985" },
   httpTerminal: { bg: "#7c3aed", borderDefault: "#6d28d9" },
@@ -21,6 +23,12 @@ function formatNodeStatusLabel(status, httpStatus) {
   const s = normalizeStatus(status);
   if (s === "REDIRECT_301") {
     return "Redirect (301)";
+  }
+  if (s === "REDIRECT_FOLLOWED") {
+    return httpStatus ? `Redirect followed (${httpStatus})` : "Redirect followed";
+  }
+  if (s === "REDIRECT_OUT_OF_SCOPE") {
+    return httpStatus ? `Redirect out of scope (${httpStatus})` : "Redirect out of scope";
   }
   if (s === "FORBIDDEN") {
     return "Forbidden (403)";
@@ -41,6 +49,12 @@ export function classifyGraphNodeKind(row) {
   const s = normalizeStatus(row?.status);
   if (s === "REDIRECT_301") {
     return "redirect301";
+  }
+  if (s === "REDIRECT_FOLLOWED") {
+    return "redirectFollowed";
+  }
+  if (s === "REDIRECT_OUT_OF_SCOPE") {
+    return "redirectOutOfScope";
   }
   if (s === "FORBIDDEN") {
     return "forbidden";

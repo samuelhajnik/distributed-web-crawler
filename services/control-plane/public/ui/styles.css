@@ -324,6 +324,18 @@ button:disabled {
   font-size: 0.82rem;
 }
 
+/* Lineage header: queued work exists but nothing in-flight (often host cooldown / backoff). */
+.stat-status--waiting-host-backoff {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.12rem 0.5rem;
+  max-width: min(100%, 14rem);
+  white-space: nowrap;
+}
+
 /* ——— Panel toolbars ——— */
 .panel-toolbar {
   display: flex;
@@ -386,9 +398,9 @@ button:disabled {
   color: #444;
   list-style: none;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 0.65rem;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.45rem;
 }
 
 .graph-panel-summary::-webkit-details-marker {
@@ -411,6 +423,15 @@ button:disabled {
   font-weight: 650;
   letter-spacing: -0.01em;
   color: #1a1a1a;
+}
+
+.graph-panel-summary-left {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .graph-panel-summary-hint {
@@ -465,6 +486,18 @@ button:disabled {
   flex: 0 0 auto;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.graph-activity-badge {
+  display: none;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.graph-activity-badge--visible {
+  display: inline-flex;
 }
 
 .graph-auto-center-control {

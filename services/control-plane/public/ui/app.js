@@ -27,6 +27,7 @@ const el = {
   httpTerminal: document.getElementById("c-http-terminal"),
   failed: document.getElementById("c-failed"),
   discovered: document.getElementById("c-discovered"),
+  graphActivityBadge: document.getElementById("graph-activity-badge"),
   pollStatus: document.getElementById("poll-status"),
   graphMeta: document.getElementById("graph-meta"),
   graphWarn: document.getElementById("graph-warn"),
@@ -64,6 +65,8 @@ let graphTerminalFinalized = false;
 let graphTerminalFinalizationInProgress = false;
 /** True only while graph subsystem is intentionally paused due to hidden-tab lifecycle. */
 let graphPausedForHiddenTab = false;
+let activityRunId = null;
+let hasSeenInProgressOnce = false;
 
 const graphView = createLineageGraphView(el.graphContainer, el.graphNodeInfo, {
   // Real user navigation disables auto-zoom so the app stops fighting user-controlled viewport.
@@ -145,6 +148,12 @@ function formatUrlStatus(status, httpStatus = null, includeCode = false) {
   if (u === "REDIRECT_301") {
     return includeCode ? "Redirect (301)" : "Redirect";
   }
+  if (u === "REDIRECT_FOLLOWED") {
+    return includeCode ? `Redirect followed (${httpStatus ?? "?"})` : "Redirect followed";
+  }
+  if (u === "REDIRECT_OUT_OF_SCOPE") {
+    return includeCode ? `Redirect out of scope (${httpStatus ?? "?"})` : "Redirect out of scope";
+  }
   if (u === "FORBIDDEN") {
     return includeCode ? "Forbidden (403)" : "Forbidden";
   }
@@ -171,6 +180,38 @@ function setPollStatus(msg, isError = false) {
   el.pollStatus.className = isError ? "err" : "muted";
 }
 
+/** When RUNNING with queued URLs but none in flight, after we've seen at least one claim (avoids startup false positive). */
+function deriveWaitingHostBackoffBadge(summary) {
+  const status = String(summary?.status ?? "").toUpperCase();
+  const totals = summary?.totals ?? {};
+  const inProgress = Number(totals.in_progress ?? 0);
+  const queue = Number(totals.queued ?? 0);
+
+  if (activityRunId !== summary?.crawl_run_id) {
+    activityRunId = summary?.crawl_run_id ?? null;
+    hasSeenInProgressOnce = false;
+  }
+  if (inProgress > 0) {
+    hasSeenInProgressOnce = true;
+  }
+
+  if (status === "RUNNING" && queue > 0 && inProgress === 0 && hasSeenInProgressOnce) {
+    return "waiting-host-backoff";
+  }
+  return null;
+}
+
+function renderHostBackoffWaitingBadge(summary) {
+  const variant = deriveWaitingHostBackoffBadge(summary);
+  if (!variant) {
+    el.graphActivityBadge.textContent = "";
+    el.graphActivityBadge.className = "graph-activity-badge";
+    return;
+  }
+  el.graphActivityBadge.textContent = "Waiting · host backoff";
+  el.graphActivityBadge.className = `stat-status stat-status--${variant} graph-activity-badge graph-activity-badge--visible`;
+}
+
 function renderSummary(summary) {
   el.runId.textContent = String(summary?.crawl_run_id ?? activeRunId ?? "—");
   const st = summary?.status;
@@ -187,6 +228,8 @@ function renderSummary(summary) {
   el.failed.textContent = String(totals.failed ?? 0);
   el.discovered.textContent = String(totals.discovered ?? 0);
   el.runConfig.textContent = JSON.stringify(summary?.run_config ?? {}, null, 2);
+
+  renderHostBackoffWaitingBadge(summary);
 }
 
 function updateUrlPaginationUi(rows, pagination) {

@@ -123,13 +123,16 @@
 
       <details class="panel panel--graph graph-panel-details" id="graph-panel-details" open>
         <summary class="graph-panel-summary">
-          <span class="graph-panel-summary-title">Lineage graph</span>
-          <span class="muted graph-panel-summary-hint">Show or hide</span>
+          <span class="graph-panel-summary-left">
+            <span class="graph-panel-summary-title">Lineage graph</span>
+            <span class="muted graph-panel-summary-hint">Show or hide</span>
+          </span>
+          <span id="graph-activity-badge" class="graph-activity-badge" aria-live="polite"></span>
         </summary>
         <div class="graph-panel-body">
           <div class="panel-toolbar">
             <div class="panel-toolbar-left">
-              <span id="graph-meta" class="panel-meta" aria-live="polite">—</span>
+              <span id="graph-meta" class="panel-meta" aria-live="polite"></span>
               <span id="graph-warn" class="panel-meta panel-meta--warn" aria-live="polite"></span>
             </div>
             <div class="panel-toolbar-right graph-controls">

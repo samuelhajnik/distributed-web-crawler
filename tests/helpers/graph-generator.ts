@@ -152,14 +152,15 @@ export function generateHtmlGraph(origin: string, seed: number, n: number): Gene
   // Mix in deterministic structural overlays for richer graph shapes.
   const hubA = 1 + Math.floor(rand() * Math.max(1, n - 1));
   const hubB = 1 + Math.floor(rand() * Math.max(1, n - 1));
-  const chainStart = Math.floor(rand() * n);
   const chainLen = Math.max(3, Math.floor(n / 3));
+  const maxChainStart = Math.max(0, n - (chainLen + 1));
+  const chainStart = Math.floor(rand() * (maxChainStart + 1));
   const repeatedTarget = Math.floor(rand() * n);
 
   // Long chain segment (in addition to the ring) keeps deep traversal coverage.
   for (let step = 0; step < chainLen; step++) {
-    const from = (chainStart + step) % n;
-    const to = (from + 1) % n;
+    const from = chainStart + step;
+    const to = from + 1;
     add(from, {
       rawHref: paths[to]!,
       category: "internal_relative",

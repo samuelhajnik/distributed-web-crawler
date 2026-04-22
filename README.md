@@ -212,7 +212,9 @@ Vitest tests live in `packages/shared` for:
 These tests drive the **real control-plane API** against **local static HTML fixtures** served from the host, so expected URL sets and status totals are **known exactly** (unlike live sites, which drift and hide edge cases).
 
 - **Fixed fixtures** (`tests/e2e/fixed-fixtures.test.ts`) — small hand-written graphs: single page, duplicate + fragment + external link, broken link (404), cycle, and an optional **www / host-scope** case (`E2E_WWW=1`).
-- **Seeded graphs** (`tests/e2e/generated-graph.test.ts`) — deterministic random HTML graphs (default seeds `42424` and `91817`; page count `E2E_GRAPH_PAGES`, default 11). On failure the run prints `TEST_GRAPH_SEED` so you can rerun with the same value.
+- **Seeded graphs** (`tests/e2e/generated-graph.test.ts`) — deterministic random HTML graphs where the generator also precomputes the expected crawl result from its graph model (default seeds `42424` and `91817`; default page count is a small/fast `11`). The test runs the real crawler and compares exported output to that generator-derived expectation. On failure the run prints `TEST_GRAPH_SEED` so you can rerun with the same value.
+- For local debugging, set `E2E_GRAPH_ORACLE_CROSSCHECK=1` to additionally compare the generator-derived expectation against the legacy oracle simulation.
+- For extra local confidence before larger refactors, run the opt-in larger variants (`npm run test:e2e:generated:medium` or `npm run test:e2e:generated:stress`).
 - **Worker equivalence** — `scripts/e2e-worker-equivalence.sh` rescales Compose workers, runs two exports of the same fixture, and runs `npm run compare-results`. Alternatively, set `E2E_EXPORT_A` and `E2E_EXPORT_B` to two export JSON paths and run `vitest run --config vitest.e2e.config.ts tests/e2e/worker-equivalence-exports.test.ts`.
 
 **Prerequisites:** `docker compose up --build -d` (control plane + Postgres + Redis + **worker**). The worker image includes `extra_hosts: host.docker.internal:host-gateway` so it can fetch fixtures; the harness serves on `0.0.0.0` and uses seed URLs like `http://host.docker.internal:<port>/…` (override with `E2E_FIXTURE_HOST=127.0.0.1` if both the API and the worker run on the host, not in Docker).
@@ -223,6 +225,8 @@ npm run build -w @crawler/shared   # tests import @crawler/shared
 npm run test:e2e                   # all E2E (fixed + generated + skipped export compare)
 npm run test:e2e:fixed
 npm run test:e2e:generated
+npm run test:e2e:generated:medium
+npm run test:e2e:generated:stress
 ```
 
 **Rerun one failing generated case:**

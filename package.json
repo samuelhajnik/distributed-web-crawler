@@ -11,6 +11,8 @@
     "test": "npm run test -w @crawler/shared && npm run test -w worker",
     "test:e2e": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts",
     "test:e2e:generated": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts tests/e2e/generated-graph.test.ts",
+    "test:e2e:generated:medium": "npm run build -w @crawler/shared && E2E_GRAPH_PAGES=25 vitest run --config vitest.e2e.config.ts tests/e2e/generated-graph.test.ts",
+    "test:e2e:generated:stress": "npm run build -w @crawler/shared && E2E_GRAPH_PAGES=50 vitest run --config vitest.e2e.config.ts tests/e2e/generated-graph.test.ts",
     "test:e2e:fixed": "npm run build -w @crawler/shared && vitest run --config vitest.e2e.config.ts tests/e2e/fixed-fixtures.test.ts",
     "compare-results": "tsx scripts/compare-results.ts",
     "build": "npm run build --workspaces",

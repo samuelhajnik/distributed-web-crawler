@@ -1,15 +1,12 @@
 import { load } from "cheerio";
 import { normalizeUrl, parseSeedUrl } from "@crawler/shared";
+import type { LocalPageGraph } from "./generated-graph-types";
 
 /**
  * Reference crawl over a known set of pages (normalized URL -> HTML).
  * Mirrors documented rules: same link extraction as production (a[href]),
  * {@link normalizeUrl} for scope (intentionally shared with crawler to avoid oracle drift).
  */
-export type LocalPageGraph = {
-  /** Full normalized URLs that exist and return HTML 200 */
-  pages: Map<string, string>;
-};
 
 export type OracleResult = {
   allUrls: Set<string>;
@@ -77,12 +74,4 @@ export function simulateLocalCrawl(seedUrl: string, graph: LocalPageGraph): Orac
       failed: failed.size
     }
   };
-}
-
-export function assertSetsEqual(a: Set<string>, b: Set<string>, label: string): void {
-  const onlyA = [...a].filter((x) => !b.has(x)).sort();
-  const onlyB = [...b].filter((x) => !a.has(x)).sort();
-  if (onlyA.length || onlyB.length) {
-    throw new Error(`${label} mismatch onlyA=${JSON.stringify(onlyA)} onlyB=${JSON.stringify(onlyB)}`);
-  }
 }

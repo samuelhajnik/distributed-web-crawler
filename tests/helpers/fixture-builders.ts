@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { normalizeAbsoluteUrl, parseSeedUrl } from "@crawler/shared";
-import type { LocalPageGraph } from "./oracle";
+import type { LocalPageGraph } from "./generated-graph-types";
 
 /** Canonical normalized URL string aligned with `POST /crawl-runs` + `parseSeedUrl`. */
 function u(origin: string, pathname: string): string {

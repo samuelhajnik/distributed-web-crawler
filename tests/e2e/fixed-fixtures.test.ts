@@ -18,7 +18,7 @@ import {
   writeSinglePageFixture,
   writeWwwScopeFixture
 } from "../helpers/fixture-builders";
-import type { LocalPageGraph } from "../helpers/oracle";
+import type { LocalPageGraph } from "../helpers/generated-graph-types";
 import { simulateLocalCrawl } from "../helpers/oracle";
 import { startStaticSite } from "../helpers/static-site-server";
 
@@ -54,7 +54,7 @@ async function runCase(setup: (dir: string, origin: string) => { graph: LocalPag
     await waitForCrawlComplete(crawlRunId, { timeoutMs: 120_000 });
     const summary = await getSummary(crawlRunId);
     const exp = await exportJson(crawlRunId);
-    assertExportMatchesOracle(summary, exp, oracle);
+    assertExportMatchesOracle(summary, exp, oracle, { seedUrl });
   } finally {
     await site.close();
   }

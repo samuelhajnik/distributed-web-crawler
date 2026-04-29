@@ -17,7 +17,20 @@ CREATE TABLE IF NOT EXISTS crawl_urls (
   id BIGSERIAL PRIMARY KEY,
   crawl_run_id BIGINT NOT NULL REFERENCES crawl_runs(id) ON DELETE CASCADE,
   normalized_url TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('QUEUED', 'IN_PROGRESS', 'VISITED', 'REDIRECT_FOLLOWED', 'REDIRECT_OUT_OF_SCOPE', 'REDIRECT_301', 'FORBIDDEN', 'NOT_FOUND', 'HTTP_TERMINAL', 'FAILED')),
+  status TEXT NOT NULL CHECK (
+    status IN (
+      'QUEUED',
+      'IN_PROGRESS',
+      'VISITED',
+      'REDIRECT_FOLLOWED',
+      'REDIRECT_OUT_OF_SCOPE',
+      'REDIRECT_301',
+      'FORBIDDEN',
+      'NOT_FOUND',
+      'HTTP_TERMINAL',
+      'FAILED'
+    )
+  ),
   claimed_at TIMESTAMPTZ,
   claimed_by_worker TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
@@ -28,33 +41,26 @@ CREATE TABLE IF NOT EXISTS crawl_urls (
   raw_url TEXT,
   discovered_from_url_id BIGINT REFERENCES crawl_urls(id),
   depth INTEGER NOT NULL DEFAULT 0,
+  requested_url TEXT,
+  final_url TEXT,
+  redirected BOOLEAN NOT NULL DEFAULT FALSE,
+  final_in_scope BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (crawl_run_id, normalized_url)
 );
 
-ALTER TABLE crawl_urls DROP CONSTRAINT IF EXISTS crawl_urls_status_check;
-ALTER TABLE crawl_urls
-  ADD CONSTRAINT crawl_urls_status_check
-  CHECK (status IN ('QUEUED', 'IN_PROGRESS', 'VISITED', 'REDIRECT_FOLLOWED', 'REDIRECT_OUT_OF_SCOPE', 'REDIRECT_301', 'FORBIDDEN', 'NOT_FOUND', 'HTTP_TERMINAL', 'FAILED'));
+CREATE INDEX IF NOT EXISTS idx_crawl_urls_run_status
+  ON crawl_urls(crawl_run_id, status);
 
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS claimed_by_worker TEXT;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS http_status INTEGER;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS content_type TEXT;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS visited_at TIMESTAMPTZ;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS raw_url TEXT;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS discovered_from_url_id BIGINT REFERENCES crawl_urls(id);
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS depth INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS requested_url TEXT;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS final_url TEXT;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS redirected BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE crawl_urls ADD COLUMN IF NOT EXISTS final_in_scope BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE INDEX IF NOT EXISTS idx_crawl_urls_updated
+  ON crawl_urls(updated_at);
 
-CREATE INDEX IF NOT EXISTS idx_crawl_urls_run_status ON crawl_urls(crawl_run_id, status);
-CREATE INDEX IF NOT EXISTS idx_crawl_urls_updated ON crawl_urls(updated_at);
-CREATE INDEX IF NOT EXISTS idx_crawl_urls_claimed_at ON crawl_urls(claimed_at);
-CREATE INDEX IF NOT EXISTS idx_crawl_urls_discovered_from ON crawl_urls(discovered_from_url_id);
+CREATE INDEX IF NOT EXISTS idx_crawl_urls_claimed_at
+  ON crawl_urls(claimed_at);
+
+CREATE INDEX IF NOT EXISTS idx_crawl_urls_discovered_from
+  ON crawl_urls(discovered_from_url_id);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -65,6 +71,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_crawl_urls_updated_at ON crawl_urls;
+
 CREATE TRIGGER trg_crawl_urls_updated_at
 BEFORE UPDATE ON crawl_urls
 FOR EACH ROW

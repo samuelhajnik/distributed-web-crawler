@@ -369,16 +369,16 @@ docker compose up --build -d
 docker compose up --scale worker=3 -d
 ```
 
-### Migrations (existing volume)
+### Database initialization
+
+Postgres is initialized automatically from `db/init.sql` when the Docker volume is created.
+
+For a completely fresh local database:
 
 ```bash
-docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/001_p0_hardening.sql
-docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/002_p1_discovered_raw.sql
-docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/003_crawl_scope.sql
-docker compose exec -T postgres psql -U crawler -d crawler < db/migrations/004_run_config_and_depth.sql
+docker compose down -v
+docker compose up --build -d
 ```
-
-Fresh volumes pick up `db/init.sql` automatically.
 
 ### Prometheus
 

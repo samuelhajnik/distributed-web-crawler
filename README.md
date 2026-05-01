@@ -1,5 +1,7 @@
 # Distributed Web Crawler
 
+[![CI](https://github.com/samuelhajnik/distributed-web-crawler/actions/workflows/ci.yml/badge.svg)](https://github.com/samuelhajnik/distributed-web-crawler/actions/workflows/ci.yml)
+
 This repository is a small distributed crawler built to explore a specific systems question: how to keep crawl state durable and inspectable while work is executed asynchronously across multiple workers.
 
 In this implementation, Postgres stores the canonical frontier, Redis/BullMQ handles job dispatch, and a control plane runs reconciliation plus stale-lease recovery. The scope is intentionally narrower than a full production crawler; the focus is on making concurrency and failure behavior explicit and testable.
@@ -447,3 +449,9 @@ First bottlenecks are usually **Postgres write contention** on `crawl_urls`, **R
 - Outbox / transactional enqueue if you want to narrow the reconciliation window further
 - Content storage / WARC export
 - Richer integration tests (Testcontainers) for full stack paths
+
+## CI
+
+GitHub Actions runs on pushes and pull requests to `main`. The workflow installs dependencies, runs the unit test suite, builds the TypeScript workspaces, validates the Docker Compose configuration, starts the local crawler stack, waits for the API health endpoint, and runs the end-to-end crawler fixture tests.
+
+This keeps the repository’s main correctness claims continuously verified: the project builds, the local stack can start, and the documented E2E crawler behavior remains executable.

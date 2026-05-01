@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Build, test, and validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck --if-present
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build workspaces
+        run: npm run build
+
+      - name: Validate Docker Compose config
+        run: docker compose config
+
+      - name: Start crawler stack
+        run: docker compose up --build -d
+
+      - name: Wait for crawler API
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000/health >/dev/null; then
+              echo "Crawler API is healthy"
+              exit 0
+            fi
+
+            echo "Waiting for crawler API... attempt $i/60"
+            sleep 2
+          done
+
+          echo "Crawler API did not become healthy in time"
+          docker compose ps
+          docker compose logs
+          exit 1
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+      - name: Show Docker Compose logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop crawler stack
+        if: always()
+        run: docker compose down -v

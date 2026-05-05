@@ -6,7 +6,12 @@ import unusedImports from "eslint-plugin-unused-imports";
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "services/control-plane/public/ui/**"]
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/coverage/**",
+      "services/control-plane/public/ui/**"
+    ]
   },
   {
     files: ["**/*.ts"],

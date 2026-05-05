@@ -27,15 +27,24 @@ export function assertExportMatchesExpected(
     throw new Error(`frontier not empty: ${JSON.stringify(summary.totals)}`);
   }
 
-  const st = (s: string | undefined) => String(s ?? "").trim().toUpperCase();
+  const st = (s: string | undefined) =>
+    String(s ?? "")
+      .trim()
+      .toUpperCase();
   const visited = new Set(
-    exp.urls.filter((u) => st(u.status) === "VISITED" && u.normalized_url).map((u) => u.normalized_url)
+    exp.urls
+      .filter((u) => st(u.status) === "VISITED" && u.normalized_url)
+      .map((u) => u.normalized_url)
   );
   const failed = new Set(
-    exp.urls.filter((u) => st(u.status) === "FAILED" && u.normalized_url).map((u) => u.normalized_url)
+    exp.urls
+      .filter((u) => st(u.status) === "FAILED" && u.normalized_url)
+      .map((u) => u.normalized_url)
   );
   const notFound = new Set(
-    exp.urls.filter((u) => st(u.status) === "NOT_FOUND" && u.normalized_url).map((u) => u.normalized_url)
+    exp.urls
+      .filter((u) => st(u.status) === "NOT_FOUND" && u.normalized_url)
+      .map((u) => u.normalized_url)
   );
   const all = new Set(exp.urls.map((u) => u.normalized_url));
   const seedUrl = options.seedUrl;
@@ -61,7 +70,9 @@ export function assertExportMatchesExpected(
   expect(summary.totals.not_found).toBe(expected.summary.notFound);
   expect(summary.totals.http_terminal).toBe(0);
   expect(summary.totals.failed).toBe(expected.summary.failed);
-  expect(summary.totals.discovered).toBe(summary.totals.visited + summary.totals.not_found + summary.totals.failed);
+  expect(summary.totals.discovered).toBe(
+    summary.totals.visited + summary.totals.not_found + summary.totals.failed
+  );
 }
 
 export function assertExportMatchesOracle(
@@ -89,7 +100,9 @@ function assertSetsEqual(a: Set<string>, b: Set<string>, label: string): void {
   const onlyA = [...a].filter((x) => !b.has(x)).sort();
   const onlyB = [...b].filter((x) => !a.has(x)).sort();
   if (onlyA.length || onlyB.length) {
-    throw new Error(`${label} mismatch onlyA=${JSON.stringify(onlyA)} onlyB=${JSON.stringify(onlyB)}`);
+    throw new Error(
+      `${label} mismatch onlyA=${JSON.stringify(onlyA)} onlyB=${JSON.stringify(onlyB)}`
+    );
   }
 }
 

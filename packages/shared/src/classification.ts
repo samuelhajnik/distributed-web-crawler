@@ -17,7 +17,10 @@ export type FetchClassification = {
  *
  * **5xx**: `retryable: true` until URL-level retries are exhausted, then terminal `HTTP_TERMINAL`.
  */
-export function classifyHttpResponse(statusCode: number, contentType: string | null): FetchClassification {
+export function classifyHttpResponse(
+  statusCode: number,
+  contentType: string | null
+): FetchClassification {
   if (statusCode >= 200 && statusCode < 300) {
     return {
       retryable: false,
@@ -94,8 +97,7 @@ export function classifyHttpResponse(statusCode: number, contentType: string | n
 export function classifyExecutionError(err: unknown): FetchClassification {
   const message = (err as Error)?.message ?? String(err);
   const rawCode = (err as { code?: string | number })?.code;
-  const codeForReason =
-    rawCode !== undefined && rawCode !== null ? String(rawCode) : "";
+  const codeForReason = rawCode !== undefined && rawCode !== null ? String(rawCode) : "";
   const codeStr = typeof rawCode === "number" ? String(rawCode) : rawCode;
 
   const retryableCodes = new Set([

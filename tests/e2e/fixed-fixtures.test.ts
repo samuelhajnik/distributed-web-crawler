@@ -22,7 +22,7 @@ import type { LocalPageGraph } from "../helpers/generated-graph-types";
 import { simulateLocalCrawl } from "../helpers/oracle";
 import { startStaticSite } from "../helpers/static-site-server";
 
-let tmpDirs: string[] = [];
+const tmpDirs: string[] = [];
 afterEach(() => {
   for (const d of tmpDirs.splice(0)) {
     fs.rmSync(d, { recursive: true, force: true });
@@ -44,7 +44,9 @@ beforeAll(async () => {
   }
 });
 
-async function runCase(setup: (dir: string, origin: string) => { graph: LocalPageGraph; seedUrl: string }): Promise<void> {
+async function runCase(
+  setup: (dir: string, origin: string) => { graph: LocalPageGraph; seedUrl: string }
+): Promise<void> {
   const dir = mkFixtureDir();
   const site = await startStaticSite(dir);
   try {
@@ -77,7 +79,10 @@ describe("E2E fixed fixtures", () => {
     await runCase((dir, origin) => writeCycleFixture(dir, origin));
   });
 
-  it.skipIf(process.env.E2E_WWW !== "1")("www host in scope (set E2E_WWW=1 to enable)", async () => {
-    await runCase((dir, origin) => writeWwwScopeFixture(dir, origin));
-  });
+  it.skipIf(process.env.E2E_WWW !== "1")(
+    "www host in scope (set E2E_WWW=1 to enable)",
+    async () => {
+      await runCase((dir, origin) => writeWwwScopeFixture(dir, origin));
+    }
+  );
 });

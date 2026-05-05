@@ -30,17 +30,13 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
     barnesHut: { gravitationalConstant: -2800, springLength: 120, springConstant: 0.04 }
   };
 
-  const network = new visNetwork.Network(
-    containerEl,
-    data,
-    {
-      physics: physicsOptions,
-      layout: { improvedLayout: true },
-      edges: { smooth: { type: "continuous" }, arrows: { to: true } },
-      interaction: { hover: true, navigationButtons: true, zoomView: true },
-      nodes: { borderWidth: 1, borderWidthSelected: 2 }
-    }
-  );
+  const network = new visNetwork.Network(containerEl, data, {
+    physics: physicsOptions,
+    layout: { improvedLayout: true },
+    edges: { smooth: { type: "continuous" }, arrows: { to: true } },
+    interaction: { hover: true, navigationButtons: true, zoomView: true },
+    nodes: { borderWidth: 1, borderWidthSelected: 2 }
+  });
 
   const normalNetworkOptions = {
     physics: physicsOptions,
@@ -179,7 +175,11 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
       // Early graph states can be framed slightly too tight; apply a small one-shot
       // conservative scale adjustment for smaller graphs instead of delayed choreography.
       const multiplier = getAutoCenterScaleMultiplier(getCounts().nodeCount);
-      if (multiplier < 1 && typeof network.getScale === "function" && typeof network.moveTo === "function") {
+      if (
+        multiplier < 1 &&
+        typeof network.getScale === "function" &&
+        typeof network.moveTo === "function"
+      ) {
         const currentScale = Number(network.getScale());
         if (Number.isFinite(currentScale) && currentScale > 0) {
           network.moveTo({ scale: currentScale * multiplier, animation: false });

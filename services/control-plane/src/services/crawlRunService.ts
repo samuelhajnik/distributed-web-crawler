@@ -40,7 +40,10 @@ export class CrawlRunService {
   private readonly crawlUrlRepository = new CrawlUrlRepository();
 
   async createRun(input: unknown): Promise<{ status: number; body: unknown }> {
-    const body = input as { seedUrl?: unknown; settings?: Record<string, unknown> } & Record<string, unknown>;
+    const body = input as { seedUrl?: unknown; settings?: Record<string, unknown> } & Record<
+      string,
+      unknown
+    >;
     if (body?.seedUrl === undefined || body.seedUrl === null) {
       return { status: 400, body: { error: "seedUrl is required" } };
     }
@@ -50,7 +53,10 @@ export class CrawlRunService {
     const seedInput = body.seedUrl.trim();
     const parsed = parseSeedUrl(seedInput);
     if (!parsed) {
-      return { status: 400, body: { error: "Invalid seedUrl: expected absolute http(s) URL with a host" } };
+      return {
+        status: 400,
+        body: { error: "Invalid seedUrl: expected absolute http(s) URL with a host" }
+      };
     }
 
     const allowedHostsArray = Array.from(parsed.allowedHosts);
@@ -72,7 +78,13 @@ export class CrawlRunService {
         VALUES ($1, $2, $3, $4, $5::jsonb, 'RUNNING')
         RETURNING id, root_url, seed_url, normalized_seed_url, allowed_hosts, run_config, status, started_at
         `,
-        [parsed.normalized, seedInput, parsed.normalized, allowedHostsArray, JSON.stringify(runConfig)]
+        [
+          parsed.normalized,
+          seedInput,
+          parsed.normalized,
+          allowedHostsArray,
+          JSON.stringify(runConfig)
+        ]
       );
       created = runResult.rows[0] as Record<string, unknown>;
       crawlRunId = Number(created.id);
@@ -95,10 +107,17 @@ export class CrawlRunService {
     logCp(crawlRunId, `crawl-started url_id=${urlId} root=${parsed.normalized}`);
 
     try {
-      await this.queue.add("crawl-url", { crawlRunId, urlId }, { removeOnComplete: 2000, removeOnFail: 2000 });
+      await this.queue.add(
+        "crawl-url",
+        { crawlRunId, urlId },
+        { removeOnComplete: 2000, removeOnFail: 2000 }
+      );
       crawlUrlsRequeuedTotal.inc();
     } catch (queueErr) {
-      logCp(crawlRunId, `initial-enqueue-failed url_id=${urlId} err=${(queueErr as Error).message}`);
+      logCp(
+        crawlRunId,
+        `initial-enqueue-failed url_id=${urlId} err=${(queueErr as Error).message}`
+      );
     }
 
     return { status: 201, body: { ...created, run_config: publicRunConfig(created.run_config) } };
@@ -140,7 +159,11 @@ export class CrawlRunService {
     };
   }
 
-  async exportRun(crawlRunId: number, format: string, limit: number): Promise<{ status: number; body: unknown; headers?: Record<string, string> }> {
+  async exportRun(
+    crawlRunId: number,
+    format: string,
+    limit: number
+  ): Promise<{ status: number; body: unknown; headers?: Record<string, string> }> {
     const rows = await this.crawlUrlRepository.getExportRows(crawlRunId, limit);
     if (format === "csv") {
       const header =
@@ -251,7 +274,14 @@ export class CrawlRunService {
   ): Promise<{ status: number; body: unknown }> {
     const order = orderRaw === "desc" ? "DESC" : "ASC";
     const sortCol = SORT_COLUMNS[sortKey] ?? "id";
-    const page = await this.crawlUrlRepository.getUrlsPage(crawlRunId, status, limit, offset, sortCol, order);
+    const page = await this.crawlUrlRepository.getUrlsPage(
+      crawlRunId,
+      status,
+      limit,
+      offset,
+      sortCol,
+      order
+    );
     return {
       status: 200,
       body: {
@@ -303,7 +333,10 @@ export class CrawlRunService {
     await this.queue.close();
   }
 
-  private async finalizeRunIfStableAndComplete(crawlRunId: number, counts: RunCounts): Promise<void> {
+  private async finalizeRunIfStableAndComplete(
+    crawlRunId: number,
+    counts: RunCounts
+  ): Promise<void> {
     crawlCompletionChecksTotal.inc();
     const isEmptyFrontier = counts.queued_count === 0 && counts.in_progress_count === 0;
     const prior = this.completionState.get(crawlRunId)?.empty_cycles ?? 0;
@@ -312,7 +345,11 @@ export class CrawlRunService {
     this.completionState.set(crawlRunId, { empty_cycles: next });
 
     if (next >= 2) {
-      const completed = await this.crawlRunRepository.markCompleted(crawlRunId, counts.visited_count, counts.failed_count);
+      const completed = await this.crawlRunRepository.markCompleted(
+        crawlRunId,
+        counts.visited_count,
+        counts.failed_count
+      );
       if (completed) {
         crawlRunsCompletedTotal.inc();
         logCp(
@@ -327,7 +364,10 @@ export class CrawlRunService {
   }
 
   private async requeueStaleClaims(crawlRunId: number): Promise<number> {
-    const staleIds = await this.crawlUrlRepository.recoverStaleClaims(crawlRunId, CLAIM_STALE_SECONDS);
+    const staleIds = await this.crawlUrlRepository.recoverStaleClaims(
+      crawlRunId,
+      CLAIM_STALE_SECONDS
+    );
     const n = staleIds.length;
     if (n > 0) {
       crawlStaleClaimsRecoveredTotal.inc(n);
@@ -344,7 +384,10 @@ export class CrawlRunService {
   }
 
   private async reconcileQueuedRows(crawlRunId: number): Promise<number> {
-    const queuedIds = await this.crawlUrlRepository.getQueuedUrlIds(crawlRunId, RECONCILE_BATCH_SIZE);
+    const queuedIds = await this.crawlUrlRepository.getQueuedUrlIds(
+      crawlRunId,
+      RECONCILE_BATCH_SIZE
+    );
     const queuedJobs = buildCrawlBulkJobs(crawlRunId, queuedIds);
     if (queuedJobs.length > 0) {
       await this.queue.addBulk(queuedJobs);
@@ -362,4 +405,3 @@ export class CrawlRunService {
     crawlUrlsFailedGauge.set(row.failed ?? 0);
   }
 }
-

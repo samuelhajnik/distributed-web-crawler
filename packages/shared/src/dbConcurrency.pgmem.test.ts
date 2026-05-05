@@ -58,7 +58,10 @@ describe("db concurrency (pg-mem)", () => {
 
     expect(ins.rows.length).toBe(1);
 
-    const count = await pool.query(`SELECT COUNT(*)::int AS c FROM crawl_urls WHERE crawl_run_id = $1`, [crawlRunId]);
+    const count = await pool.query(
+      `SELECT COUNT(*)::int AS c FROM crawl_urls WHERE crawl_run_id = $1`,
+      [crawlRunId]
+    );
     expect(count.rows[0].c).toBe(1);
   });
 
@@ -84,7 +87,9 @@ describe("db concurrency (pg-mem)", () => {
     expect(first.rowCount).toBe(1);
     expect(second.rowCount).toBe(0);
 
-    const row = await pool.query(`SELECT status, claimed_by_worker FROM crawl_urls WHERE id = $1`, [urlId]);
+    const row = await pool.query(`SELECT status, claimed_by_worker FROM crawl_urls WHERE id = $1`, [
+      urlId
+    ]);
     expect(row.rows[0].status).toBe("IN_PROGRESS");
     expect(row.rows[0].claimed_by_worker).toBe("worker-a");
   });

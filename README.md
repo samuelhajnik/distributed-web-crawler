@@ -27,7 +27,7 @@ flowchart LR
 
 ![Demo UI — completed crawl](docs/screenshots/demo-ui-lineage-graph.png)
 
-*Demo UI — completed crawl with interactive lineage graph and URL inspection surfaces.*
+_Demo UI — completed crawl with interactive lineage graph and URL inspection surfaces._
 
 ## What this repo demonstrates
 
@@ -153,7 +153,7 @@ The control plane serves a minimal browser UI at `http://localhost:3000/ui/`. It
 
 ![Demo UI — run summary](docs/screenshots/demo-ui-run-summary.png)
 
-*Start a crawl and inspect live run counters and final status.*
+_Start a crawl and inspect live run counters and final status._
 
 ### Graph evolution during a run
 
@@ -161,23 +161,23 @@ The lineage graph is most useful while the crawl is still active, because the di
 
 ![Demo UI — graph early](docs/screenshots/demo-ui-graph-early.png)
 
-*Early stage — the crawl begins expanding outward from the seed URL.*
+_Early stage — the crawl begins expanding outward from the seed URL._
 
 ![Demo UI — graph mid](docs/screenshots/demo-ui-graph-mid.png)
 
-*Mid-run — more branches and terminal outcomes become visible as the crawl progresses.*
+_Mid-run — more branches and terminal outcomes become visible as the crawl progresses._
 
 ![Demo UI — graph late](docs/screenshots/demo-ui-graph-large.png)
 
-*Late stage — the graph captures the complete discovered structure of the run, including major branches and terminal results.*
+_Late stage — the graph captures the complete discovered structure of the run, including major branches and terminal results._
 
 ![Demo UI — node detail inspection](docs/screenshots/demo-ui-node-detail.png)
 
-*Graph node inspection — selecting a discovered URL reveals per-node metadata such as status, depth, parent lineage (`discovered_from_url_id`), retry count, and terminal error classification, while keeping the surrounding crawl structure visible.*
+_Graph node inspection — selecting a discovered URL reveals per-node metadata such as status, depth, parent lineage (`discovered_from_url_id`), retry count, and terminal error classification, while keeping the surrounding crawl structure visible._
 
 ![Demo UI — URL table](docs/screenshots/demo-ui-urls-table.png)
 
-*Paginated URL inspection view with status, depth, lineage, and terminal outcome details.*
+_Paginated URL inspection view with status, depth, lineage, and terminal outcome details._
 
 **Behavior notes:** **Run status and counters** come from `/crawl-runs/:id/summary` (~every **1.5s** while a run is active). The **URL table** uses the same loop with **200** rows per page (`limit`/`offset`), **Previous** / **Next**, and refreshes the current page without jumping to page 1. **Lineage graph** polling is separate and loads up to **50,000** URL rows from `/urls` plus a matching `/graph` edge limit. **Graph refresh interval** is configurable in the UI (**1–10s**, default **3s**); it only affects browser polling, not `run_config`.
 
@@ -239,16 +239,16 @@ TEST_GRAPH_SEED=91817 npm run test:e2e:generated
 
 ## API reference (inspection)
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/crawl-runs` | Start a crawl (JSON body with required `seedUrl` and optional per-run `settings`) |
-| `GET` | `/crawl-runs/:id` | Status + triggers one maintenance pass |
-| `GET` | `/crawl-runs/:id/summary` | Aggregates + run meta |
-| `GET` | `/crawl-runs/:id/urls` | Paginated URL rows (`status`, `limit`, `offset`, `sort`, `order`) |
-| `GET` | `/crawl-runs/:id/export?format=json\|csv` | Export sample (default `limit=50000`, includes `id` + lineage fields) |
-| `GET` | `/crawl-runs/:id/graph` | Discovery edge list (`discovered_from_url_id → id`) for lineage inspection |
-| `GET` | `/metrics` | Prometheus (control-plane) |
-| `GET` | `/health` | Liveness |
+| Method | Path                                      | Purpose                                                                           |
+| ------ | ----------------------------------------- | --------------------------------------------------------------------------------- |
+| `POST` | `/crawl-runs`                             | Start a crawl (JSON body with required `seedUrl` and optional per-run `settings`) |
+| `GET`  | `/crawl-runs/:id`                         | Status + triggers one maintenance pass                                            |
+| `GET`  | `/crawl-runs/:id/summary`                 | Aggregates + run meta                                                             |
+| `GET`  | `/crawl-runs/:id/urls`                    | Paginated URL rows (`status`, `limit`, `offset`, `sort`, `order`)                 |
+| `GET`  | `/crawl-runs/:id/export?format=json\|csv` | Export sample (default `limit=50000`, includes `id` + lineage fields)             |
+| `GET`  | `/crawl-runs/:id/graph`                   | Discovery edge list (`discovered_from_url_id → id`) for lineage inspection        |
+| `GET`  | `/metrics`                                | Prometheus (control-plane)                                                        |
+| `GET`  | `/health`                                 | Liveness                                                                          |
 
 ### Start a crawl (`POST /crawl-runs`)
 
@@ -310,16 +310,16 @@ Full narrative + failure-mode table: **[docs/observability.md](docs/observabilit
 
 ### What the key metrics mean
 
-| Metric | What it measures |
-|--------|------------------|
-| `crawl_fetch_duration_seconds` (worker histogram) | Time from starting the gated HTTP request until response headers are available. |
-| `crawl_processing_duration_seconds` (worker histogram) | Wall time **after a successful claim** for the whole job (body read, parse, DB writes, enqueue children). |
-| `crawl_queue_latency_seconds` (worker histogram) | `now - job.timestamp` when the job starts—queueing + scheduling delay before your worker thread picks it up. |
-| `crawl_urls_retried_total` / `crawl_urls_failed_total` | Retry vs terminal failure pressure on the frontier. |
-| `crawl_stale_claims_recovered_total` | How often lease expiry saved work that would otherwise look “stuck in flight.” |
-| `crawl_queue_reconciliation_*` | How aggressively the control plane is re-publishing `QUEUED` rows—your “enqueue gap” safety valve. |
-| `crawl_reconciliation_cycle_duration_seconds` (control plane) | Cost of one full maintenance sweep across active runs. |
-| `processed_urls_total` (worker counter) | One tick per **claimed** URL job after `processJob` finishes (visited, failed, or re-queued for retry)—a coarse “we actually handled claimed work” counter. |
+| Metric                                                        | What it measures                                                                                                                                            |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crawl_fetch_duration_seconds` (worker histogram)             | Time from starting the gated HTTP request until response headers are available.                                                                             |
+| `crawl_processing_duration_seconds` (worker histogram)        | Wall time **after a successful claim** for the whole job (body read, parse, DB writes, enqueue children).                                                   |
+| `crawl_queue_latency_seconds` (worker histogram)              | `now - job.timestamp` when the job starts—queueing + scheduling delay before your worker thread picks it up.                                                |
+| `crawl_urls_retried_total` / `crawl_urls_failed_total`        | Retry vs terminal failure pressure on the frontier.                                                                                                         |
+| `crawl_stale_claims_recovered_total`                          | How often lease expiry saved work that would otherwise look “stuck in flight.”                                                                              |
+| `crawl_queue_reconciliation_*`                                | How aggressively the control plane is re-publishing `QUEUED` rows—your “enqueue gap” safety valve.                                                          |
+| `crawl_reconciliation_cycle_duration_seconds` (control plane) | Cost of one full maintenance sweep across active runs.                                                                                                      |
+| `processed_urls_total` (worker counter)                       | One tick per **claimed** URL job after `processJob` finishes (visited, failed, or re-queued for retry)—a coarse “we actually handled claimed work” counter. |
 
 ### Interpreting the metrics
 
@@ -332,12 +332,12 @@ Full narrative + failure-mode table: **[docs/observability.md](docs/observabilit
 
 Located in `scripts/` (executable):
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/crawl-start.sh <seedUrl>` | `POST /crawl-runs` with JSON body (requires `node` on `PATH`) |
-| `scripts/crawl-summary.sh <id>` | `GET /crawl-runs/:id/summary` (expects `jq`) |
-| `scripts/crawl-visited-sample.sh <id> [limit]` | Recent visited URLs |
-| `scripts/compare-crawl-exports.sh a.json b.json` | Set diff on `normalized_url` (bash / `comm`) |
+| Script                                           | Purpose                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| `scripts/crawl-start.sh <seedUrl>`               | `POST /crawl-runs` with JSON body (requires `node` on `PATH`) |
+| `scripts/crawl-summary.sh <id>`                  | `GET /crawl-runs/:id/summary` (expects `jq`)                  |
+| `scripts/crawl-visited-sample.sh <id> [limit]`   | Recent visited URLs                                           |
+| `scripts/compare-crawl-exports.sh a.json b.json` | Set diff on `normalized_url` (bash / `comm`)                  |
 
 Environment: `CRAWLER_API` (default `http://localhost:3000`).
 
@@ -403,15 +403,15 @@ Worker metrics server listens on `WORKER_METRICS_PORT` (default `9091`). Paralle
 
 Workers use several **independent** process-level knobs (set via environment when you start the worker binary; defaults are defined in `services/worker/src/concurrencyConfig.ts`):
 
-| Variable | Role | Default | Trade-off |
-|----------|------|---------|-----------|
-| `WORKER_CONCURRENCY` | BullMQ: how many URL jobs run concurrently in this process | **8** | More jobs in flight → faster frontier drain and more parallel DB/network work; too high can overload the worker or the origin. |
-| `FETCH_CONCURRENCY` | Global in-process cap on concurrent HTTP attempts (across those jobs) | **12** | Separates “queue concurrency” from “socket concurrency”; raises ceiling for link-rich pages without necessarily opening more TCP connections than this cap. |
-| `FETCH_CONCURRENCY_PER_HOST` | Per-hostname cap within this process | **4** | Reduces accidental burst load on a single origin; still not a distributed politeness layer. |
-| `FETCH_MIN_GAP_PER_HOST_MS` | Minimum spacing between **scheduled starts** of outbound requests to the same hostname (plus jitter), before fetch concurrency gates | **40** | Demo-friendly smoothing on one origin; **process-local only**. Set to **0** to disable the gap (jitter-only still applies if `FETCH_GAP_JITTER_MS` is greater than zero). |
-| `FETCH_GAP_JITTER_MS` | Random extra delay **0…N ms** sampled per paced request. If min gap is also enabled, jitter is **capped at that min gap** so it rarely doubles the enforced spacing. | **25** | Adds light spread; **0** for deterministic spacing only. |
-| `FETCH_HOST_COOLDOWN_BASE_MS` | After deny/rate-limit/transient-server signals (403/429/retryable 5xx), extra per-host delay before new requests start; backoff doubles each repeat up to **MAX** | **500** | **Process-local only** (not coordinated across replicas). Set to **0** to disable. Applies before pacing. |
-| `FETCH_HOST_COOLDOWN_MAX_MS` | Upper bound for each cooldown extension | **5000** | Keeps backoff bounded; tune with BASE for stricter/softer reactions. |
+| Variable                      | Role                                                                                                                                                                 | Default  | Trade-off                                                                                                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKER_CONCURRENCY`          | BullMQ: how many URL jobs run concurrently in this process                                                                                                           | **8**    | More jobs in flight → faster frontier drain and more parallel DB/network work; too high can overload the worker or the origin.                                            |
+| `FETCH_CONCURRENCY`           | Global in-process cap on concurrent HTTP attempts (across those jobs)                                                                                                | **12**   | Separates “queue concurrency” from “socket concurrency”; raises ceiling for link-rich pages without necessarily opening more TCP connections than this cap.               |
+| `FETCH_CONCURRENCY_PER_HOST`  | Per-hostname cap within this process                                                                                                                                 | **4**    | Reduces accidental burst load on a single origin; still not a distributed politeness layer.                                                                               |
+| `FETCH_MIN_GAP_PER_HOST_MS`   | Minimum spacing between **scheduled starts** of outbound requests to the same hostname (plus jitter), before fetch concurrency gates                                 | **40**   | Demo-friendly smoothing on one origin; **process-local only**. Set to **0** to disable the gap (jitter-only still applies if `FETCH_GAP_JITTER_MS` is greater than zero). |
+| `FETCH_GAP_JITTER_MS`         | Random extra delay **0…N ms** sampled per paced request. If min gap is also enabled, jitter is **capped at that min gap** so it rarely doubles the enforced spacing. | **25**   | Adds light spread; **0** for deterministic spacing only.                                                                                                                  |
+| `FETCH_HOST_COOLDOWN_BASE_MS` | After deny/rate-limit/transient-server signals (403/429/retryable 5xx), extra per-host delay before new requests start; backoff doubles each repeat up to **MAX**    | **500**  | **Process-local only** (not coordinated across replicas). Set to **0** to disable. Applies before pacing.                                                                 |
+| `FETCH_HOST_COOLDOWN_MAX_MS`  | Upper bound for each cooldown extension                                                                                                                              | **5000** | Keeps backoff bounded; tune with BASE for stricter/softer reactions.                                                                                                      |
 
 Per-host pacing applies only at **outbound fetch scheduling** time. It does **not** replace run-level **`demoDelayMs`** (demo-wide coarse slowdown across all URLs), which remains separate.
 

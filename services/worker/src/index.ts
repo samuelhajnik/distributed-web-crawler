@@ -48,33 +48,36 @@ import {
 
 const workerConcurrency = readWorkerEnvInt("WORKER_CONCURRENCY", DEFAULT_WORKER_CONCURRENCY);
 const fetchGlobalMax = readWorkerEnvInt("FETCH_CONCURRENCY", DEFAULT_FETCH_CONCURRENCY);
-const fetchPerHostMax = readWorkerEnvInt("FETCH_CONCURRENCY_PER_HOST", DEFAULT_FETCH_PER_HOST_CONCURRENCY);
+const fetchPerHostMax = readWorkerEnvInt(
+  "FETCH_CONCURRENCY_PER_HOST",
+  DEFAULT_FETCH_PER_HOST_CONCURRENCY
+);
 const workerId = process.env.WORKER_ID ?? `${os.hostname()}-${process.pid}`;
 const metricsPort = Number(process.env.WORKER_METRICS_PORT ?? 9091);
 const queue = createCrawlQueue();
 
 /** Honest product id in a common UA shape; avoids mimicking a specific browser build. */
-const DEFAULT_REQUEST_USER_AGENT =
-  "Mozilla/5.0 (compatible; distributed-web-crawler/1.0)";
+const DEFAULT_REQUEST_USER_AGENT = "Mozilla/5.0 (compatible; distributed-web-crawler/1.0)";
 const REQUEST_USER_AGENT = process.env.CRAWLER_USER_AGENT?.trim() || DEFAULT_REQUEST_USER_AGENT;
 
 /** Shared defaults for document-style GETs (undici fetch + request; redirect-following fetch reuses the same options). */
 function buildRequestHeaders(): Record<string, string> {
   return {
     "user-agent": REQUEST_USER_AGENT,
-    accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "accept-language": "en-US,en;q=0.9"
   };
 }
 
 /** Undici `request()` uses Node header objects; normalize `Retry-After` for parsing. */
-function retryAfterFromUndiciHeaders(headers: Record<string, string | string[] | undefined>): string | null {
+function retryAfterFromUndiciHeaders(
+  headers: Record<string, string | string[] | undefined>
+): string | null {
   const raw = headers["retry-after"] ?? headers["Retry-After"];
   if (raw == null) {
     return null;
   }
-  return Array.isArray(raw) ? raw[0] ?? null : raw;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
 const runContextCache = new Map<number, { value: RunContext; until: number }>();
@@ -117,7 +120,12 @@ function isAllowedByScope(host: string, ctx: RunContext): boolean {
 
 function normalizeCandidateUrl(baseUrl: string, rawHref: string, ctx: RunContext): string | null {
   const href = rawHref.trim();
-  if (!href || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
+  if (
+    !href ||
+    href.startsWith("mailto:") ||
+    href.startsWith("tel:") ||
+    href.startsWith("javascript:")
+  ) {
     return null;
   }
   let resolved: URL;
@@ -133,7 +141,10 @@ function normalizeCandidateUrl(baseUrl: string, rawHref: string, ctx: RunContext
     return null;
   }
   resolved.hash = "";
-  if ((resolved.protocol === "https:" && resolved.port === "443") || (resolved.protocol === "http:" && resolved.port === "80")) {
+  if (
+    (resolved.protocol === "https:" && resolved.port === "443") ||
+    (resolved.protocol === "http:" && resolved.port === "80")
+  ) {
     resolved.port = "";
   }
   return resolved.toString();
@@ -145,7 +156,10 @@ async function getRunContext(crawlRunId: number): Promise<RunContext> {
   if (cached && cached.until > now) {
     return cached.value;
   }
-  const res = await pgPool.query(`SELECT normalized_seed_url, run_config FROM crawl_runs WHERE id = $1`, [crawlRunId]);
+  const res = await pgPool.query(
+    `SELECT normalized_seed_url, run_config FROM crawl_runs WHERE id = $1`,
+    [crawlRunId]
+  );
   if (!res.rowCount) {
     const fallback: RunContext = {
       seedHost: "",
@@ -154,7 +168,10 @@ async function getRunContext(crawlRunId: number): Promise<RunContext> {
     };
     return fallback;
   }
-  const row = res.rows[0] as { normalized_seed_url: string; run_config: Partial<CrawlRunConfig> | null };
+  const row = res.rows[0] as {
+    normalized_seed_url: string;
+    run_config: Partial<CrawlRunConfig> | null;
+  };
   const seed = new URL(row.normalized_seed_url);
   const cfg = { ...DEFAULT_CRAWL_RUN_CONFIG, ...(row.run_config ?? {}) } as Record<string, unknown>;
   delete cfg.workerConcurrency;
@@ -170,7 +187,11 @@ async function getRunContext(crawlRunId: number): Promise<RunContext> {
 }
 
 const fetchGateway = createFetchGateway(fetchGlobalMax, fetchPerHostMax);
-const { pacer: hostPacer, minGapMs: fetchMinGapPerHostMs, jitterMaxMs: fetchGapJitterMs } = loadHostPacerFromEnv();
+const {
+  pacer: hostPacer,
+  minGapMs: fetchMinGapPerHostMs,
+  jitterMaxMs: fetchGapJitterMs
+} = loadHostPacerFromEnv();
 const {
   cooldown: hostCooldown,
   baseBackoffMs: fetchHostCooldownBaseMs,
@@ -193,7 +214,9 @@ type RedirectResolution = {
 };
 
 function logW(crawlRunId: number, urlId: number, msg: string): void {
-  process.stdout.write(`[worker worker_id=${workerId} crawl_run=${crawlRunId} url_id=${urlId}] ${msg}\n`);
+  process.stdout.write(
+    `[worker worker_id=${workerId} crawl_run=${crawlRunId} url_id=${urlId}] ${msg}\n`
+  );
 }
 
 async function claimUrl(urlId: number, crawlRunIdHint: number): Promise<ClaimedUrl | null> {
@@ -253,11 +276,15 @@ async function markVisited(
     ]
   );
   crawlUrlsVisitedTotal.inc();
-  logW(crawlRunId, urlId, `complete status=${resolution.redirected ? "REDIRECT_FOLLOWED" : "VISITED"} http_status=${httpStatus ?? "null"}`);
+  logW(
+    crawlRunId,
+    urlId,
+    `complete status=${resolution.redirected ? "REDIRECT_FOLLOWED" : "VISITED"} http_status=${httpStatus ?? "null"}`
+  );
 }
 
 function getRetryDelayMs(retryCount: number, backoffMultiplier = 1): number {
-  const computed = RETRY_BASE_DELAY_MS * (2 ** retryCount) * backoffMultiplier;
+  const computed = RETRY_BASE_DELAY_MS * 2 ** retryCount * backoffMultiplier;
   return Math.min(RETRY_MAX_DELAY_MS, computed);
 }
 
@@ -339,10 +366,18 @@ async function markFailedOrRetry(
       `,
       [urlId, classification.reason, classification.httpStatus, classification.contentType]
     );
-    await queue.add("crawl-url", { crawlRunId, urlId }, { delay, removeOnComplete: 2000, removeOnFail: 2000 });
+    await queue.add(
+      "crawl-url",
+      { crawlRunId, urlId },
+      { delay, removeOnComplete: 2000, removeOnFail: 2000 }
+    );
     crawlUrlsRetriedTotal.inc();
     crawlUrlsRequeuedTotal.inc();
-    logW(crawlRunId, urlId, `retry-scheduled attempt=${retryCount + 1} delay_ms=${delay} reason="${classification.reason}"`);
+    logW(
+      crawlRunId,
+      urlId,
+      `retry-scheduled attempt=${retryCount + 1} delay_ms=${delay} reason="${classification.reason}"`
+    );
     return;
   }
 
@@ -362,7 +397,13 @@ async function markFailedOrRetry(
     );
     return;
   }
-  await markFailed(crawlRunId, urlId, classification.reason, classification.httpStatus, classification.contentType);
+  await markFailed(
+    crawlRunId,
+    urlId,
+    classification.reason,
+    classification.httpStatus,
+    classification.contentType
+  );
 }
 
 async function markFailedOrRetryFromError(
@@ -394,7 +435,10 @@ async function markFailedOrRetryFromResponse(
   await markFailedOrRetry(crawlRunId, urlId, retryCount, classification, maxRetries, retryAfterMs);
 }
 
-async function markDiscoveredUrlsEnqueued(crawlRunId: number, insertedIds: { id: number }[]): Promise<void> {
+async function markDiscoveredUrlsEnqueued(
+  crawlRunId: number,
+  insertedIds: { id: number }[]
+): Promise<void> {
   const jobs = insertedIds.map((row) => ({
     name: "crawl-url",
     data: { crawlRunId, urlId: Number(row.id) },
@@ -417,7 +461,10 @@ async function storeDiscoveredUrls(
     return { inserted: [], duplicatesSkipped: 0 };
   }
 
-  const countRes = await pgPool.query(`SELECT COUNT(*)::int AS c FROM crawl_urls WHERE crawl_run_id = $1`, [crawlRunId]);
+  const countRes = await pgPool.query(
+    `SELECT COUNT(*)::int AS c FROM crawl_urls WHERE crawl_run_id = $1`,
+    [crawlRunId]
+  );
   const existing = Number(countRes.rows[0]?.c ?? 0);
   const remaining = Math.max(0, maxPages - existing);
   if (remaining === 0) {
@@ -635,7 +682,11 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
         return;
       }
 
-      if (!String(contentType ?? "").toLowerCase().includes("text/html")) {
+      if (
+        !String(contentType ?? "")
+          .toLowerCase()
+          .includes("text/html")
+      ) {
         await markVisited(claimed.crawl_run_id, claimed.id, statusCode, contentType, resolution);
         return;
       }
@@ -715,14 +766,10 @@ async function processJob(job: Job<CrawlJobPayload>): Promise<void> {
   }
 }
 
-const worker = new Worker<CrawlJobPayload>(
-  CRAWL_QUEUE_NAME,
-  async (job) => processJob(job),
-  {
-    connection: redisConnection,
-    concurrency: workerConcurrency
-  }
-);
+const worker = new Worker<CrawlJobPayload>(CRAWL_QUEUE_NAME, async (job) => processJob(job), {
+  connection: redisConnection,
+  concurrency: workerConcurrency
+});
 
 worker.on("failed", (_job, _err) => undefined);
 worker.on("error", (_err) => undefined);

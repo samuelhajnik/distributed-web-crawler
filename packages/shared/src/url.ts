@@ -1,5 +1,8 @@
 function stripDefaultPort(u: URL): void {
-  if ((u.protocol === "https:" && u.port === "443") || (u.protocol === "http:" && u.port === "80")) {
+  if (
+    (u.protocol === "https:" && u.port === "443") ||
+    (u.protocol === "http:" && u.port === "80")
+  ) {
     u.port = "";
   }
 }
@@ -73,9 +76,18 @@ export function parseSeedUrl(
   return { normalized, hostname, allowedHosts };
 }
 
-export function normalizeUrl(baseUrl: string, rawHref: string, allowedHosts: ReadonlySet<string>): string | null {
+export function normalizeUrl(
+  baseUrl: string,
+  rawHref: string,
+  allowedHosts: ReadonlySet<string>
+): string | null {
   const href = rawHref.trim();
-  if (!href || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
+  if (
+    !href ||
+    href.startsWith("mailto:") ||
+    href.startsWith("tel:") ||
+    href.startsWith("javascript:")
+  ) {
     return null;
   }
 

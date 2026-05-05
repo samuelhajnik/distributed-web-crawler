@@ -35,7 +35,9 @@ function diff(a: Set<string>, b: Set<string>): string[] {
 const fileA = process.argv[2];
 const fileB = process.argv[3];
 if (!fileA || !fileB) {
-  process.stderr.write("usage: npx tsx scripts/compare-results.ts <export-a.json> <export-b.json>\n");
+  process.stderr.write(
+    "usage: npx tsx scripts/compare-results.ts <export-a.json> <export-b.json>\n"
+  );
   process.exit(2);
 }
 
@@ -50,11 +52,15 @@ process.stdout.write(`run A: ${fileA} unique_urls=${setA.size}\n`);
 process.stdout.write(`run B: ${fileB} unique_urls=${setB.size}\n`);
 process.stdout.write(`missing in B (relative to A): ${onlyA.length}\n`);
 if (onlyA.length) {
-  process.stdout.write(onlyA.slice(0, 20).join("\n") + (onlyA.length > 20 ? "\n... (truncated)\n" : "\n"));
+  process.stdout.write(
+    onlyA.slice(0, 20).join("\n") + (onlyA.length > 20 ? "\n... (truncated)\n" : "\n")
+  );
 }
 process.stdout.write(`extra in B (relative to A): ${onlyB.length}\n`);
 if (onlyB.length) {
-  process.stdout.write(onlyB.slice(0, 20).join("\n") + (onlyB.length > 20 ? "\n... (truncated)\n" : "\n"));
+  process.stdout.write(
+    onlyB.slice(0, 20).join("\n") + (onlyB.length > 20 ? "\n... (truncated)\n" : "\n")
+  );
 }
 process.stdout.write(`identical_sets=${identical}\n`);
 

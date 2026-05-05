@@ -314,7 +314,9 @@ function renderGraph(snapshot, options = {}) {
 
   const model = buildLineageGraph(snapshot.urls, snapshot.graph);
   el.graphMeta.textContent = `${model.nodeCount.toLocaleString()} nodes · ${model.edgeCount.toLocaleString()} edges`;
-  el.graphWarn.textContent = snapshot.graphError ? `Incomplete graph data: ${snapshot.graphError}` : "";
+  el.graphWarn.textContent = snapshot.graphError
+    ? `Incomplete graph data: ${snapshot.graphError}`
+    : "";
 
   const signature = buildGraphSignature(model);
   const shouldFreezeTerminalGraph = graphRunTerminal && graphTerminalFinalized;

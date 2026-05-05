@@ -4,10 +4,10 @@ This project treats **metrics + structured logs** as first-class operator tools.
 
 ## Metrics endpoints
 
-| Service | URL (Docker network) | Host dev |
-|--------|----------------------|----------|
+| Service       | URL (Docker network)                | Host dev                        |
+| ------------- | ----------------------------------- | ------------------------------- |
 | Control plane | `http://control-plane:3000/metrics` | `http://localhost:3000/metrics` |
-| Worker | `http://worker:9091/metrics` | map `9091` if published |
+| Worker        | `http://worker:9091/metrics`        | map `9091` if published         |
 
 Prometheus (Compose): **http://localhost:9090** — verify **Targets** are healthy.
 
@@ -36,13 +36,13 @@ Prometheus (Compose): **http://localhost:9090** — verify **Targets** are healt
 
 ## Detecting common failure modes
 
-| Symptom | Likely signal |
-|---------|----------------|
-| Stuck frontier | Gauges show `QUEUED>0` forever; reconciliation counters increase; queue latency high |
-| Retry storm | `crawl_urls_retried_total` climbs; `crawl_fetch_duration`/`processing` erratic |
-| Slow origin | `crawl_fetch_duration_seconds` p95/p99 up; `processing` follows if HTML is large |
-| Reconciliation churn | `crawl_queue_reconciliation_enqueued_total` high vs visited progress; long `crawl_reconciliation_cycle_duration_seconds` |
-| Near completion oscillation | completion logs + empty-frontier streak (see README) |
+| Symptom                     | Likely signal                                                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Stuck frontier              | Gauges show `QUEUED>0` forever; reconciliation counters increase; queue latency high                                     |
+| Retry storm                 | `crawl_urls_retried_total` climbs; `crawl_fetch_duration`/`processing` erratic                                           |
+| Slow origin                 | `crawl_fetch_duration_seconds` p95/p99 up; `processing` follows if HTML is large                                         |
+| Reconciliation churn        | `crawl_queue_reconciliation_enqueued_total` high vs visited progress; long `crawl_reconciliation_cycle_duration_seconds` |
+| Near completion oscillation | completion logs + empty-frontier streak (see README)                                                                     |
 
 ## Logs
 

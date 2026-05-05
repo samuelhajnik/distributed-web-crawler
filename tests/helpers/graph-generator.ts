@@ -124,7 +124,9 @@ export function generateHtmlGraph(origin: string, seed: number, n: number): Gene
         });
       } else if (roll < 0.38 && n >= 3) {
         const miss = (i + 17) % n;
-        const missingUrl = normalizeAbsoluteUrl(`${origin.replace(/\/$/, "")}/gen-missing-${i}-${miss}.html`)!;
+        const missingUrl = normalizeAbsoluteUrl(
+          `${origin.replace(/\/$/, "")}/gen-missing-${i}-${miss}.html`
+        )!;
         add(i, {
           rawHref: missingUrl,
           category: "internal_missing",
@@ -222,7 +224,9 @@ export function generateHtmlGraph(origin: string, seed: number, n: number): Gene
 
   // Ensure missing references and ignored/out-of-scope links always exist.
   for (let i = 2; i < n; i += 6) {
-    const missingUrl = normalizeAbsoluteUrl(`${origin.replace(/\/$/, "")}/gen-missing-overlay-${i}.html`)!;
+    const missingUrl = normalizeAbsoluteUrl(
+      `${origin.replace(/\/$/, "")}/gen-missing-overlay-${i}.html`
+    )!;
     add(i, {
       rawHref: missingUrl,
       category: "internal_missing",
@@ -231,7 +235,11 @@ export function generateHtmlGraph(origin: string, seed: number, n: number): Gene
     });
   }
   add(0, { rawHref: "mailto:x@y.com", category: "ignored_mailto", targetPageExists: false });
-  add(0, { rawHref: "https://example.com/ext", category: "external_out_of_scope", targetPageExists: false });
+  add(0, {
+    rawHref: "https://example.com/ext",
+    category: "external_out_of_scope",
+    targetPageExists: false
+  });
 
   const ensureCycle = () => {
     for (let i = 0; i < n; i++) {
@@ -280,7 +288,10 @@ function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
-function deriveExpectedFromModel(seedUrl: string, model: GeneratedGraphModel): GeneratedGraphExpected {
+function deriveExpectedFromModel(
+  seedUrl: string,
+  model: GeneratedGraphModel
+): GeneratedGraphExpected {
   const parsed = parseSeedUrl(seedUrl);
   if (!parsed) {
     throw new Error(`generator: invalid seed ${seedUrl}`);

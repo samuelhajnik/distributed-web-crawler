@@ -19,7 +19,13 @@
         <form id="start-form" class="start-form">
           <div class="start-field start-field--full">
             <label for="seed-url">Seed URL</label>
-            <input id="seed-url" name="seedUrl" type="url" required placeholder="https://example.com/" />
+            <input
+              id="seed-url"
+              name="seedUrl"
+              type="url"
+              required
+              placeholder="https://example.com/"
+            />
           </div>
           <div class="start-grid">
             <div class="start-field">
@@ -39,12 +45,22 @@
             </div>
           </div>
           <div class="start-row-checks">
-            <label class="check"><input id="include-documents" type="checkbox" /> Include documents</label>
-            <label class="check"><input id="follow-redirects" type="checkbox" /> Follow redirects</label>
+            <label class="check"
+              ><input id="include-documents" type="checkbox" /> Include documents</label
+            >
+            <label class="check"
+              ><input id="follow-redirects" type="checkbox" /> Follow redirects</label
+            >
           </div>
           <div class="start-field start-field--secondary">
             <label for="demo-delay-ms">Demo delay (ms)</label>
-            <input id="demo-delay-ms" type="number" min="0" value="0" title="Extra delay between jobs for demos" />
+            <input
+              id="demo-delay-ms"
+              type="number"
+              min="0"
+              value="0"
+              title="Extra delay between jobs for demos"
+            />
           </div>
           <details class="advanced">
             <summary>Advanced settings</summary>
@@ -157,7 +173,9 @@
                 <input id="graph-auto-center-toggle" type="checkbox" checked />
                 <span>Auto-center</span>
               </label>
-              <button id="graph-fit-btn" type="button" class="btn-secondary graph-fit-btn">Fit graph</button>
+              <button id="graph-fit-btn" type="button" class="btn-secondary graph-fit-btn">
+                Fit graph
+              </button>
             </div>
           </div>
           <div class="graph-legend" aria-label="Lineage graph legend">

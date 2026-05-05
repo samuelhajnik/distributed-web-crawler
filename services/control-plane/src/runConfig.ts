@@ -1,4 +1,9 @@
-import { clampInt, DEFAULT_CRAWL_RUN_CONFIG, type CrawlRunConfig, type ScopeMode } from "@crawler/shared";
+import {
+  clampInt,
+  DEFAULT_CRAWL_RUN_CONFIG,
+  type CrawlRunConfig,
+  type ScopeMode
+} from "@crawler/shared";
 
 function toBool(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") {
@@ -20,7 +25,11 @@ function normalizeScope(value: unknown, fallback: ScopeMode): ScopeMode {
 }
 
 /** Accepted in POST body for backwards compatibility but never stored (process-level only). */
-const IGNORED_LEGACY_PER_RUN_KEYS = ["workerConcurrency", "fetchConcurrency", "fetchPerHostConcurrency"] as const;
+const IGNORED_LEGACY_PER_RUN_KEYS = [
+  "workerConcurrency",
+  "fetchConcurrency",
+  "fetchPerHostConcurrency"
+] as const;
 
 export function stripIgnoredLegacySettings(
   input: Record<string, unknown> | undefined
@@ -44,13 +53,19 @@ export function buildRunConfig(overrides: Record<string, unknown> | undefined): 
     includeDocuments: toBool(inCfg.includeDocuments, DEFAULT_CRAWL_RUN_CONFIG.includeDocuments),
     followRedirects: toBool(inCfg.followRedirects, DEFAULT_CRAWL_RUN_CONFIG.followRedirects),
     demoDelayMs: clampInt(inCfg.demoDelayMs, DEFAULT_CRAWL_RUN_CONFIG.demoDelayMs, 0, 10_000),
-    requestTimeoutMs: clampInt(inCfg.requestTimeoutMs, DEFAULT_CRAWL_RUN_CONFIG.requestTimeoutMs, 500, 120_000),
+    requestTimeoutMs: clampInt(
+      inCfg.requestTimeoutMs,
+      DEFAULT_CRAWL_RUN_CONFIG.requestTimeoutMs,
+      500,
+      120_000
+    ),
     maxRetries: clampInt(inCfg.maxRetries, DEFAULT_CRAWL_RUN_CONFIG.maxRetries, 0, 20)
   };
 }
 
 export function publicRunConfig(raw: unknown): CrawlRunConfig {
-  const base = typeof raw === "object" && raw !== null ? { ...(raw as Record<string, unknown>) } : {};
+  const base =
+    typeof raw === "object" && raw !== null ? { ...(raw as Record<string, unknown>) } : {};
   for (const k of IGNORED_LEGACY_PER_RUN_KEYS) {
     delete base[k];
   }

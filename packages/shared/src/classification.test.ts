@@ -63,13 +63,16 @@ describe("classifyHttpResponse", () => {
     [408, "retryable_http_408"],
     [421, "retryable_http_421"],
     [425, "retryable_http_425"]
-  ] as const)("treats %i as retryable transient HTTP with HTTP_TERMINAL after exhausted retries", (code, reason) => {
-    const r = classifyHttpResponse(code, null);
-    expect(r.retryable).toBe(true);
-    expect(r.reason).toBe(reason);
-    expect(r.httpStatus).toBe(code);
-    expect(r.terminalStatus).toBe("HTTP_TERMINAL");
-  });
+  ] as const)(
+    "treats %i as retryable transient HTTP with HTTP_TERMINAL after exhausted retries",
+    (code, reason) => {
+      const r = classifyHttpResponse(code, null);
+      expect(r.retryable).toBe(true);
+      expect(r.reason).toBe(reason);
+      expect(r.httpStatus).toBe(code);
+      expect(r.terminalStatus).toBe("HTTP_TERMINAL");
+    }
+  );
 });
 
 describe("classifyExecutionError", () => {

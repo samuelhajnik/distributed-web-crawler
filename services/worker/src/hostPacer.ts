@@ -111,7 +111,11 @@ export class HostPacer {
   }
 }
 
-export function loadHostPacerFromEnv(): { pacer: HostPacer; minGapMs: number; jitterMaxMs: number } {
+export function loadHostPacerFromEnv(): {
+  pacer: HostPacer;
+  minGapMs: number;
+  jitterMaxMs: number;
+} {
   const minGapMs = readWorkerEnvNonNegativeInt(
     "FETCH_MIN_GAP_PER_HOST_MS",
     DEFAULT_FETCH_MIN_GAP_PER_HOST_MS

@@ -15,7 +15,7 @@ import { generateHtmlGraph, writeGeneratedGraphToDisk } from "../helpers/graph-g
 import { simulateLocalCrawl } from "../helpers/oracle";
 import { startStaticSite } from "../helpers/static-site-server";
 
-let tmpDirs: string[] = [];
+const tmpDirs: string[] = [];
 afterEach(() => {
   for (const d of tmpDirs.splice(0)) {
     fs.rmSync(d, { recursive: true, force: true });

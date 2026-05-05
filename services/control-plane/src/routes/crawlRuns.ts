@@ -96,7 +96,8 @@ export function registerCrawlRunRoutes(app: Express, crawlRunService: CrawlRunSe
   app.get("/crawl-runs/:id/urls", async (req, res) => {
     try {
       const crawlRunId = Number(req.params.id);
-      const status = typeof req.query.status === "string" ? req.query.status.toUpperCase() : undefined;
+      const status =
+        typeof req.query.status === "string" ? req.query.status.toUpperCase() : undefined;
       const limit = Math.min(50000, Math.max(1, Number(req.query.limit ?? 50)));
       const offset = Math.max(0, Number(req.query.offset ?? 0));
       const sortKey = typeof req.query.sort === "string" ? req.query.sort.toLowerCase() : "id";
@@ -111,7 +112,14 @@ export function registerCrawlRunRoutes(app: Express, crawlRunService: CrawlRunSe
         return;
       }
 
-      const result = await crawlRunService.listRunUrls(crawlRunId, status ?? null, limit, offset, sortKey, orderRaw);
+      const result = await crawlRunService.listRunUrls(
+        crawlRunId,
+        status ?? null,
+        limit,
+        offset,
+        sortKey,
+        orderRaw
+      );
       res.status(result.status).json(result.body);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

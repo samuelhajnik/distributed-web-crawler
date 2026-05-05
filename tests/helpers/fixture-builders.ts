@@ -6,7 +6,10 @@ import type { LocalPageGraph } from "./generated-graph-types";
 /** Canonical normalized URL string aligned with `POST /crawl-runs` + `parseSeedUrl`. */
 function u(origin: string, pathname: string): string {
   const o = origin.replace(/\/$/, "");
-  const raw = pathname === "/" || pathname === "" ? `${o}/` : `${o}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+  const raw =
+    pathname === "/" || pathname === ""
+      ? `${o}/`
+      : `${o}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
   const abs = normalizeAbsoluteUrl(raw);
   if (!abs) {
     throw new Error(`bad fixture url raw=${raw}`);
@@ -18,7 +21,10 @@ function u(origin: string, pathname: string): string {
   return p.normalized;
 }
 
-export function writeSinglePageFixture(dir: string, origin: string): { graph: LocalPageGraph; seedUrl: string } {
+export function writeSinglePageFixture(
+  dir: string,
+  origin: string
+): { graph: LocalPageGraph; seedUrl: string } {
   const html = "<!doctype html><html><body><p>only</p></body></html>";
   fs.writeFileSync(path.join(dir, "index.html"), html, "utf8");
   const seedUrl = u(origin, "/");
@@ -28,7 +34,10 @@ export function writeSinglePageFixture(dir: string, origin: string): { graph: Lo
   };
 }
 
-export function writeDuplicateAndExternalFixture(dir: string, origin: string): { graph: LocalPageGraph; seedUrl: string } {
+export function writeDuplicateAndExternalFixture(
+  dir: string,
+  origin: string
+): { graph: LocalPageGraph; seedUrl: string } {
   const seedUrl = u(origin, "/");
   const indexHtml = `<!doctype html><html><body>
     <a href="/a.html">a</a>
@@ -53,7 +62,10 @@ export function writeDuplicateAndExternalFixture(dir: string, origin: string): {
   };
 }
 
-export function writeBrokenLinkFixture(dir: string, origin: string): { graph: LocalPageGraph; seedUrl: string } {
+export function writeBrokenLinkFixture(
+  dir: string,
+  origin: string
+): { graph: LocalPageGraph; seedUrl: string } {
   const seedUrl = u(origin, "/");
   const indexHtml = `<!doctype html><html><body>
     <a href="/ok.html">ok</a>
@@ -73,7 +85,10 @@ export function writeBrokenLinkFixture(dir: string, origin: string): { graph: Lo
   };
 }
 
-export function writeCycleFixture(dir: string, origin: string): { graph: LocalPageGraph; seedUrl: string } {
+export function writeCycleFixture(
+  dir: string,
+  origin: string
+): { graph: LocalPageGraph; seedUrl: string } {
   const seedUrl = u(origin, "/a.html");
   const a = `<!doctype html><html><body><a href="/b.html">b</a></body></html>`;
   const b = `<!doctype html><html><body><a href="/c.html">c</a></body></html>`;
@@ -96,7 +111,10 @@ export function writeCycleFixture(dir: string, origin: string): { graph: LocalPa
 /**
  * index links to www host variant; w.html exists. Static server ignores Host header.
  */
-export function writeWwwScopeFixture(dir: string, origin: string): { graph: LocalPageGraph; seedUrl: string } {
+export function writeWwwScopeFixture(
+  dir: string,
+  origin: string
+): { graph: LocalPageGraph; seedUrl: string } {
   const port = new URL(origin).port;
   const wwwOrigin = `http://www.127.0.0.1:${port}`;
   const seedUrl = u(origin, "/");
@@ -125,6 +143,14 @@ export function writeDupesForScript(dir: string): void {
     <a href="/b.html">b</a>
   </body></html>`;
   fs.writeFileSync(path.join(dir, "index.html"), indexHtml, "utf8");
-  fs.writeFileSync(path.join(dir, "a.html"), "<!doctype html><html><body><p>a</p></body></html>", "utf8");
-  fs.writeFileSync(path.join(dir, "b.html"), "<!doctype html><html><body><p>b</p></body></html>", "utf8");
+  fs.writeFileSync(
+    path.join(dir, "a.html"),
+    "<!doctype html><html><body><p>a</p></body></html>",
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(dir, "b.html"),
+    "<!doctype html><html><body><p>b</p></body></html>",
+    "utf8"
+  );
 }

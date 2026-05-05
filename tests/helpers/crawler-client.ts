@@ -46,7 +46,10 @@ export async function healthCheck(): Promise<boolean> {
   }
 }
 
-export async function createCrawlRun(seedUrl: string, settings?: Record<string, unknown>): Promise<number> {
+export async function createCrawlRun(
+  seedUrl: string,
+  settings?: Record<string, unknown>
+): Promise<number> {
   const r = await fetch(`${crawlerApiBase()}/crawl-runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -61,7 +64,9 @@ export async function createCrawlRun(seedUrl: string, settings?: Record<string, 
 }
 
 /** Triggers maintenance + returns run payload including status. */
-export async function getRun(crawlRunId: number): Promise<{ status: string; queue_empty: boolean; in_progress: number }> {
+export async function getRun(
+  crawlRunId: number
+): Promise<{ status: string; queue_empty: boolean; in_progress: number }> {
   const r = await fetch(`${crawlerApiBase()}/crawl-runs/${crawlRunId}`);
   if (!r.ok) {
     throw new Error(`getRun failed ${r.status}`);
@@ -78,7 +83,9 @@ export async function getSummary(crawlRunId: number): Promise<SummaryResponse> {
 }
 
 export async function exportJson(crawlRunId: number): Promise<ExportResponse> {
-  const r = await fetch(`${crawlerApiBase()}/crawl-runs/${crawlRunId}/export?format=json&limit=500000`);
+  const r = await fetch(
+    `${crawlerApiBase()}/crawl-runs/${crawlRunId}/export?format=json&limit=500000`
+  );
   if (!r.ok) {
     throw new Error(`export failed ${r.status}`);
   }

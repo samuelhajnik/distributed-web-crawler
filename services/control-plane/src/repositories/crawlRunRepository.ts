@@ -35,7 +35,11 @@ export class CrawlRunRepository {
     return countsRes.rows[0] as RunCounts;
   }
 
-  async markCompleted(crawlRunId: number, visitedCount: number, failedCount: number): Promise<boolean> {
+  async markCompleted(
+    crawlRunId: number,
+    visitedCount: number,
+    failedCount: number
+  ): Promise<boolean> {
     const completed = await pgPool.query(
       `
         UPDATE crawl_runs

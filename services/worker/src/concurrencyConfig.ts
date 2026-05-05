@@ -43,7 +43,11 @@ export function readWorkerEnvInt(name: string, fallback: number, min = 1, max = 
 }
 
 /** Non-negative integer env (0 allowed). Used for pacing where 0 disables a component. */
-export function readWorkerEnvNonNegativeInt(name: string, fallback: number, max = 3_600_000): number {
+export function readWorkerEnvNonNegativeInt(
+  name: string,
+  fallback: number,
+  max = 3_600_000
+): number {
   const raw = process.env[name];
   if (!raw) {
     return fallback;

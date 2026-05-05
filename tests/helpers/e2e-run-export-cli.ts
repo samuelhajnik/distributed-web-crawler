@@ -21,7 +21,9 @@ async function main(): Promise<void> {
   const outPath = arg("--out");
   const fixture = arg("--fixture") ?? "dupes";
   if (!outPath) {
-    process.stderr.write("usage: npx tsx tests/helpers/e2e-run-export-cli.ts --fixture dupes --out export.json\n");
+    process.stderr.write(
+      "usage: npx tsx tests/helpers/e2e-run-export-cli.ts --fixture dupes --out export.json\n"
+    );
     process.exit(2);
   }
 

@@ -3,11 +3,15 @@ import { buildAllowedHostSet, normalizeAbsoluteUrl, normalizeUrl, parseSeedUrl }
 
 describe("buildAllowedHostSet", () => {
   it("pairs apex seed with www host", () => {
-    expect([...buildAllowedHostSet("Example.COM")].sort()).toEqual(["example.com", "www.example.com"].sort());
+    expect([...buildAllowedHostSet("Example.COM")].sort()).toEqual(
+      ["example.com", "www.example.com"].sort()
+    );
   });
 
   it("pairs www seed with apex host", () => {
-    expect([...buildAllowedHostSet("www.example.com")].sort()).toEqual(["example.com", "www.example.com"].sort());
+    expect([...buildAllowedHostSet("www.example.com")].sort()).toEqual(
+      ["example.com", "www.example.com"].sort()
+    );
   });
 });
 
@@ -45,8 +49,12 @@ describe("normalizeUrl", () => {
   const apexScope = buildAllowedHostSet("example.com");
 
   it("resolves relative links on allowed hosts", () => {
-    expect(normalizeUrl("https://example.com/", "https://example.com/page#x", apexScope)).toBe("https://example.com/page");
-    expect(normalizeUrl("https://example.com/docs/foo", "bar", apexScope)).toBe("https://example.com/docs/bar");
+    expect(normalizeUrl("https://example.com/", "https://example.com/page#x", apexScope)).toBe(
+      "https://example.com/page"
+    );
+    expect(normalizeUrl("https://example.com/docs/foo", "bar", apexScope)).toBe(
+      "https://example.com/docs/bar"
+    );
   });
 
   it("rejects hosts outside crawl scope", () => {
@@ -55,13 +63,19 @@ describe("normalizeUrl", () => {
   });
 
   it("allows www counterpart when seed was apex", () => {
-    expect(normalizeUrl("https://example.com/", "https://www.example.com/a", apexScope)).toBe("https://www.example.com/a");
+    expect(normalizeUrl("https://example.com/", "https://www.example.com/a", apexScope)).toBe(
+      "https://www.example.com/a"
+    );
   });
 
   it("allows apex when seed was www", () => {
     const wwwScope = buildAllowedHostSet("www.example.com");
-    expect(normalizeUrl("https://www.example.com/", "/b", wwwScope)).toBe("https://www.example.com/b");
-    expect(normalizeUrl("https://www.example.com/", "https://example.com/c", wwwScope)).toBe("https://example.com/c");
+    expect(normalizeUrl("https://www.example.com/", "/b", wwwScope)).toBe(
+      "https://www.example.com/b"
+    );
+    expect(normalizeUrl("https://www.example.com/", "https://example.com/c", wwwScope)).toBe(
+      "https://example.com/c"
+    );
   });
 
   it("filters non-http schemes", () => {
@@ -71,7 +85,11 @@ describe("normalizeUrl", () => {
   });
 
   it("preserves query strings and strips default port", () => {
-    expect(normalizeUrl("https://example.com/", "https://example.com/x?a=1&b=2", apexScope)).toBe("https://example.com/x?a=1&b=2");
-    expect(normalizeUrl("https://example.com/", "https://example.com:443/x", apexScope)).toBe("https://example.com/x");
+    expect(normalizeUrl("https://example.com/", "https://example.com/x?a=1&b=2", apexScope)).toBe(
+      "https://example.com/x?a=1&b=2"
+    );
+    expect(normalizeUrl("https://example.com/", "https://example.com:443/x", apexScope)).toBe(
+      "https://example.com/x"
+    );
   });
 });

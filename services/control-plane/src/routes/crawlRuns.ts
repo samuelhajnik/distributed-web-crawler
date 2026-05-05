@@ -1,0 +1,120 @@
+import type { Express } from "express";
+import { CrawlRunService } from "../services/crawlRunService";
+
+const ALLOWED_STATUSES = new Set([
+  "QUEUED",
+  "IN_PROGRESS",
+  "VISITED",
+  "REDIRECT_FOLLOWED",
+  "REDIRECT_OUT_OF_SCOPE",
+  "REDIRECT_301",
+  "FORBIDDEN",
+  "NOT_FOUND",
+  "HTTP_TERMINAL",
+  "FAILED"
+]);
+
+export function registerCrawlRunRoutes(app: Express, crawlRunService: CrawlRunService): void {
+  app.post("/crawl-runs", async (req, res) => {
+    try {
+      const result = await crawlRunService.createRun(req.body);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/crawl-runs/:id/summary", async (req, res) => {
+    try {
+      const crawlRunId = Number(req.params.id);
+      if (Number.isNaN(crawlRunId)) {
+        res.status(400).json({ error: "Invalid run id" });
+        return;
+      }
+      const result = await crawlRunService.getRunSummary(crawlRunId);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/crawl-runs/:id/export", async (req, res) => {
+    try {
+      const crawlRunId = Number(req.params.id);
+      const format = String(req.query.format ?? "json").toLowerCase();
+      const limit = Math.min(500_000, Math.max(1, Number(req.query.limit ?? 50_000)));
+      if (Number.isNaN(crawlRunId)) {
+        res.status(400).json({ error: "Invalid run id" });
+        return;
+      }
+
+      const result = await crawlRunService.exportRun(crawlRunId, format, limit);
+      if (result.headers) {
+        for (const [key, value] of Object.entries(result.headers)) {
+          res.setHeader(key, value);
+        }
+      }
+      if (typeof result.body === "string") {
+        res.status(result.status).send(result.body);
+        return;
+      }
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/crawl-runs/:id/graph", async (req, res) => {
+    try {
+      const crawlRunId = Number(req.params.id);
+      const limit = Math.min(200_000, Math.max(1, Number(req.query.limit ?? 100_000)));
+      if (Number.isNaN(crawlRunId)) {
+        res.status(400).json({ error: "Invalid run id" });
+        return;
+      }
+      const result = await crawlRunService.getRunGraph(crawlRunId, limit);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/crawl-runs/:id", async (req, res) => {
+    try {
+      const crawlRunId = Number(req.params.id);
+      if (Number.isNaN(crawlRunId)) {
+        res.status(400).json({ error: "Invalid run id" });
+        return;
+      }
+      const result = await crawlRunService.getRun(crawlRunId);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/crawl-runs/:id/urls", async (req, res) => {
+    try {
+      const crawlRunId = Number(req.params.id);
+      const status = typeof req.query.status === "string" ? req.query.status.toUpperCase() : undefined;
+      const limit = Math.min(50000, Math.max(1, Number(req.query.limit ?? 50)));
+      const offset = Math.max(0, Number(req.query.offset ?? 0));
+      const sortKey = typeof req.query.sort === "string" ? req.query.sort.toLowerCase() : "id";
+      const orderRaw = typeof req.query.order === "string" ? req.query.order.toLowerCase() : "asc";
+
+      if (Number.isNaN(crawlRunId)) {
+        res.status(400).json({ error: "Invalid run id" });
+        return;
+      }
+      if (status && !ALLOWED_STATUSES.has(status)) {
+        res.status(400).json({ error: "Invalid status filter" });
+        return;
+      }
+
+      const result = await crawlRunService.listRunUrls(crawlRunId, status ?? null, limit, offset, sortKey, orderRaw);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+}

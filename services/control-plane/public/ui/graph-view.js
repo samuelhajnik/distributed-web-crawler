@@ -9,8 +9,14 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
   let wakeFollowUpTimer = null;
   const WAKE_FOLLOWUP_MS = 200;
   let terminalFinalizeTimer = null;
+  let terminalFinalizeMinTimer = null;
+  let terminalInitialFitTimer = null;
+  let terminalInitialFitRaf1 = null;
+  let terminalInitialFitRaf2 = null;
   let finalizationSeq = 0;
   let finalizationInFlight = null;
+  let activeFinalizationInteractionSeq = null;
+  let finalizationUserInteractedSinceInitialFit = false;
   /** Terminal run (COMPLETED/FAILED): freeze layout — static nodes, no hover churn. */
   let completedMode = false;
   /** Auto-zoom controls only automatic fit; manual "Fit graph" always works. */
@@ -99,6 +105,22 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
       clearTimeout(terminalFinalizeTimer);
       terminalFinalizeTimer = null;
     }
+    if (terminalFinalizeMinTimer !== null) {
+      clearTimeout(terminalFinalizeMinTimer);
+      terminalFinalizeMinTimer = null;
+    }
+    if (terminalInitialFitTimer !== null) {
+      clearTimeout(terminalInitialFitTimer);
+      terminalInitialFitTimer = null;
+    }
+    if (terminalInitialFitRaf1 !== null) {
+      window.cancelAnimationFrame(terminalInitialFitRaf1);
+      terminalInitialFitRaf1 = null;
+    }
+    if (terminalInitialFitRaf2 !== null) {
+      window.cancelAnimationFrame(terminalInitialFitRaf2);
+      terminalInitialFitRaf2 = null;
+    }
   }
 
   function replaceAllData(model) {
@@ -126,6 +148,9 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
   function notifyViewportInteraction() {
     if (suppressViewportInteraction) {
       return;
+    }
+    if (activeFinalizationInteractionSeq !== null) {
+      finalizationUserInteractedSinceInitialFit = true;
     }
     setAutoZoomEnabled(false);
     onUserViewportInteraction?.();
@@ -159,9 +184,10 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
 
   function performFit(options = {}) {
     const requireAutoCenter = options.requireAutoCenter ?? false;
+    const respectAutoZoom = options.respectAutoZoom ?? true;
     const duration = options.duration ?? (requireAutoCenter ? 0 : 320);
     const easingFunction = options.easingFunction ?? "easeInOutQuad";
-    if (requireAutoCenter && !autoZoomEnabled) {
+    if (requireAutoCenter && respectAutoZoom && !autoZoomEnabled) {
       return;
     }
     suppressViewportInteraction = true;
@@ -354,11 +380,17 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
   }
 
   /**
-   * Terminal runs should settle briefly before freezing; immediate physics stop can preserve
-   * a poor intermediate layout. We wait for vis "stabilized" or a bounded timeout, then freeze.
+   * Terminal runs should settle in the foreground before freezing:
+   * optional one-time fit/center first, then bounded settle, then freeze.
    */
   async function finalizeCompletedLayout(options = {}) {
-    const { maxSettleMs = 1800, fit: shouldFit = false } = options;
+    const {
+      fit: shouldFit = false,
+      fitBeforeSettle = true,
+      fitAfterFreeze = true,
+      minVisibleSettleMs = 2500,
+      maxSettleMs = 10000
+    } = options;
     if (!network) {
       return;
     }
@@ -369,16 +401,39 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
     const seq = ++finalizationSeq;
     const settlePromise = new Promise((resolve) => {
       let done = false;
+      let sawStabilized = false;
+      let minSettleElapsed = false;
+      let didFit = false;
+      let didPostFreezeFit = false;
       let removeStabilizedListener = () => {};
       const onStabilized = () => {
-        finish();
+        sawStabilized = true;
+        finishIfReady();
       };
+      const effectiveMinSettleMs = Math.min(Math.max(0, minVisibleSettleMs), maxSettleMs);
 
       const cleanup = () => {
         removeStabilizedListener();
+        activeFinalizationInteractionSeq = null;
         if (terminalFinalizeTimer !== null) {
           clearTimeout(terminalFinalizeTimer);
           terminalFinalizeTimer = null;
+        }
+        if (terminalFinalizeMinTimer !== null) {
+          clearTimeout(terminalFinalizeMinTimer);
+          terminalFinalizeMinTimer = null;
+        }
+        if (terminalInitialFitTimer !== null) {
+          clearTimeout(terminalInitialFitTimer);
+          terminalInitialFitTimer = null;
+        }
+        if (terminalInitialFitRaf1 !== null) {
+          window.cancelAnimationFrame(terminalInitialFitRaf1);
+          terminalInitialFitRaf1 = null;
+        }
+        if (terminalInitialFitRaf2 !== null) {
+          window.cancelAnimationFrame(terminalInitialFitRaf2);
+          terminalInitialFitRaf2 = null;
         }
       };
 
@@ -394,14 +449,68 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
         }
         completedMode = true;
         applyEffectiveNetworkOptions();
+        if (fitAfterFreeze && shouldFit && !didPostFreezeFit) {
+          didPostFreezeFit = true;
+          // Avoid overriding manual viewport changes made during the settle window.
+          if (!finalizationUserInteractedSinceInitialFit) {
+            fit({ requireAutoCenter: true, respectAutoZoom: false });
+          }
+        }
         if (typeof network.redraw === "function") {
           network.redraw();
         }
         resolve();
       };
 
+      const finishIfReady = () => {
+        if (done) {
+          return;
+        }
+        if (!minSettleElapsed || !sawStabilized) {
+          return;
+        }
+        finish();
+      };
+
+      const runInitialFit = () => {
+        if (!shouldFit || didFit) {
+          return;
+        }
+        didFit = true;
+        // Terminal finalization fits are one-shot and should not be blocked by active-run auto-center state.
+        fit({ requireAutoCenter: true, respectAutoZoom: false });
+      };
+
+      const scheduleInitialFitAfterForegroundResume = () => {
+        if (!fitBeforeSettle) {
+          return;
+        }
+        // Hidden-tab recovery may need a foreground frame before positions are useful to fit.
+        terminalInitialFitTimer = setTimeout(() => {
+          terminalInitialFitTimer = null;
+          if (done || seq !== finalizationSeq) {
+            return;
+          }
+          terminalInitialFitRaf1 = window.requestAnimationFrame(() => {
+            terminalInitialFitRaf1 = null;
+            if (done || seq !== finalizationSeq) {
+              return;
+            }
+            terminalInitialFitRaf2 = window.requestAnimationFrame(() => {
+              terminalInitialFitRaf2 = null;
+              if (done || seq !== finalizationSeq) {
+                return;
+              }
+              runInitialFit();
+            });
+          });
+        }, 140);
+      };
+
       completedMode = false;
       network.setOptions(normalNetworkOptions);
+      activeFinalizationInteractionSeq = seq;
+      finalizationUserInteractedSinceInitialFit = false;
       if (typeof network.stopSimulation === "function") {
         network.stopSimulation();
       }
@@ -409,9 +518,7 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
       if (typeof network.redraw === "function") {
         network.redraw();
       }
-      if (shouldFit) {
-        fit();
-      }
+      scheduleInitialFitAfterForegroundResume();
 
       if (typeof network.once === "function") {
         network.once("stabilized", onStabilized);
@@ -421,6 +528,15 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
           network.off("stabilized", onStabilized);
         };
       }
+
+      terminalFinalizeMinTimer = setTimeout(() => {
+        terminalFinalizeMinTimer = null;
+        minSettleElapsed = true;
+        if (!fitBeforeSettle) {
+          runInitialFit();
+        }
+        finishIfReady();
+      }, effectiveMinSettleMs);
 
       terminalFinalizeTimer = setTimeout(() => {
         terminalFinalizeTimer = null;

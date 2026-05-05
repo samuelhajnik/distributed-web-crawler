@@ -63,6 +63,8 @@ let lastRenderedGraphEdgeCount = 0;
 let graphRunTerminal = false;
 let graphTerminalFinalized = false;
 let graphTerminalFinalizationInProgress = false;
+let graphTerminalFinalizationSeq = 0;
+let graphTerminalVisibleFinalizeListener = null;
 /** True only while graph subsystem is intentionally paused due to hidden-tab lifecycle. */
 let graphPausedForHiddenTab = false;
 let activityRunId = null;
@@ -370,21 +372,72 @@ async function fetchAndRenderTerminalGraph() {
   }
   const snap = await fetchGraphSnapshot(activeRunId);
   renderGraph(snap);
-  if (!graphTerminalFinalized && !graphTerminalFinalizationInProgress) {
-    graphTerminalFinalizationInProgress = true;
-    try {
-      // Allow a bounded final settle phase before freezing completed graphs.
-      await graphView.finalizeCompletedLayout({ maxSettleMs: 1800, fit: false });
-      graphTerminalFinalized = true;
-      graphView.setCompletedMode(true);
-    } finally {
-      graphTerminalFinalizationInProgress = false;
-    }
+  const finalizationSeq = ++graphTerminalFinalizationSeq;
+  const runIdAtRender = activeRunId;
+  if (document.hidden) {
+    scheduleTerminalFinalizationOnVisible(runIdAtRender, finalizationSeq);
+    return;
   }
+  clearScheduledTerminalVisibleFinalization();
+  await finalizeTerminalGraphLayout(runIdAtRender, finalizationSeq);
 }
 
 function forceGraphRefresh(snapshot, options = {}) {
   renderGraph(snapshot, { forceRefresh: true, suppressAutoFit: true, ...options });
+}
+
+function clearScheduledTerminalVisibleFinalization() {
+  if (graphTerminalVisibleFinalizeListener) {
+    document.removeEventListener("visibilitychange", graphTerminalVisibleFinalizeListener);
+    graphTerminalVisibleFinalizeListener = null;
+  }
+}
+
+function scheduleTerminalFinalizationOnVisible(runId, finalizationSeq) {
+  clearScheduledTerminalVisibleFinalization();
+  graphTerminalVisibleFinalizeListener = () => {
+    if (document.hidden) {
+      return;
+    }
+    clearScheduledTerminalVisibleFinalization();
+    void finalizeTerminalGraphLayout(runId, finalizationSeq);
+  };
+  document.addEventListener("visibilitychange", graphTerminalVisibleFinalizeListener);
+}
+
+async function finalizeTerminalGraphLayout(runIdAtRender, finalizationSeq) {
+  if (graphTerminalFinalized || graphTerminalFinalizationInProgress) {
+    return;
+  }
+  if (
+    !graphRunTerminal ||
+    !activeRunId ||
+    activeRunId !== runIdAtRender ||
+    finalizationSeq !== graphTerminalFinalizationSeq
+  ) {
+    return;
+  }
+  graphTerminalFinalizationInProgress = true;
+  try {
+    // One-time final fit/center first, then bounded foreground settle, then freeze.
+    await graphView.finalizeCompletedLayout({
+      fit: true,
+      fitBeforeSettle: true,
+      fitAfterFreeze: true,
+      minVisibleSettleMs: 2500,
+      maxSettleMs: 10000
+    });
+    if (
+      graphRunTerminal &&
+      activeRunId === runIdAtRender &&
+      finalizationSeq === graphTerminalFinalizationSeq
+    ) {
+      graphTerminalFinalized = true;
+      graphView.setCompletedMode(true);
+    }
+  } finally {
+    graphTerminalFinalizationInProgress = false;
+  }
 }
 
 /**
@@ -443,6 +496,7 @@ async function applyMainSnapshot(snapshot) {
     if (!graphRunTerminal) {
       graphTerminalFinalized = false;
       graphTerminalFinalizationInProgress = false;
+      clearScheduledTerminalVisibleFinalization();
     }
     graphRunTerminal = true;
     graphPausedForHiddenTab = false;
@@ -607,6 +661,8 @@ el.form.addEventListener("submit", async (ev) => {
     graphRunTerminal = false;
     graphTerminalFinalized = false;
     graphTerminalFinalizationInProgress = false;
+    graphTerminalFinalizationSeq = 0;
+    clearScheduledTerminalVisibleFinalization();
     graphPausedForHiddenTab = false;
     lastGraphSignature = null;
     graphView.setAutoZoomEnabled(true);

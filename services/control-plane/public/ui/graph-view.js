@@ -5,6 +5,9 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
   const { onAutoZoomChange, onUserViewportInteraction } = hooks;
   let suppressViewportInteraction = false;
   let fitSoonTimer = null;
+  /** Staged load/start fits; invalidated when a newer schedule runs or user pans/zooms. */
+  let stagedFitSeq = 0;
+  let stagedFitTimers = [];
   /** One delayed follow-up wake after tab resume (coalesced). */
   let wakeFollowUpTimer = null;
   const WAKE_FOLLOWUP_MS = 200;
@@ -92,7 +95,15 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
     };
   }
 
+  function clearStagedFitTimers() {
+    for (const timerId of stagedFitTimers) {
+      clearTimeout(timerId);
+    }
+    stagedFitTimers = [];
+  }
+
   function clearPendingTimers() {
+    clearStagedFitTimers();
     if (fitSoonTimer !== null) {
       clearTimeout(fitSoonTimer);
       fitSoonTimer = null;
@@ -149,6 +160,8 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
     if (suppressViewportInteraction) {
       return;
     }
+    clearStagedFitTimers();
+    stagedFitSeq += 1;
     if (activeFinalizationInteractionSeq !== null) {
       finalizationUserInteractedSinceInitialFit = true;
     }
@@ -239,6 +252,36 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
       fitSoonTimer = null;
       performFit({ ...fitOpts, requireAutoCenter: true });
     }, delayMs);
+  }
+
+  /**
+   * Deferred multi-pass fit after Load/Start so physics can spread nodes between passes.
+   * Cancelled when auto-center is off, a newer schedule runs, or the user pans/zooms.
+   */
+  function scheduleStagedFit(options = {}) {
+    if (!autoZoomEnabled) {
+      return;
+    }
+    clearStagedFitTimers();
+    const seq = ++stagedFitSeq;
+    const delaysMs = options.delaysMs ?? [100, 700, 1600];
+
+    for (let i = 0; i < delaysMs.length; i++) {
+      const delayMs = delaysMs[i];
+      const duration = i === 0 ? 0 : 140;
+      const timerId = setTimeout(() => {
+        if (seq !== stagedFitSeq || !autoZoomEnabled) {
+          return;
+        }
+        window.requestAnimationFrame(() => {
+          if (seq !== stagedFitSeq || !autoZoomEnabled) {
+            return;
+          }
+          performFit({ requireAutoCenter: true, duration });
+        });
+      }, delayMs);
+      stagedFitTimers.push(timerId);
+    }
   }
 
   function getCounts() {
@@ -443,6 +486,8 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
         }
         done = true;
         cleanup();
+        clearStagedFitTimers();
+        stagedFitSeq += 1;
         if (seq !== finalizationSeq) {
           resolve();
           return;
@@ -453,7 +498,12 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
           didPostFreezeFit = true;
           // Avoid overriding manual viewport changes made during the settle window.
           if (!finalizationUserInteractedSinceInitialFit) {
-            fit({ requireAutoCenter: true, respectAutoZoom: false });
+            window.requestAnimationFrame(() => {
+              if (seq !== finalizationSeq) {
+                return;
+              }
+              fit({ requireAutoCenter: true, respectAutoZoom: false });
+            });
           }
         }
         if (typeof network.redraw === "function") {
@@ -578,6 +628,7 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
     clear,
     fit,
     fitSoon,
+    scheduleStagedFit,
     getCounts,
     getLastModel,
     setAutoZoomEnabled,

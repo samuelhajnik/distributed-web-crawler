@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
   normalized_seed_url TEXT NOT NULL,
   allowed_hosts TEXT[] NOT NULL,
   run_config JSONB NOT NULL DEFAULT '{}'::jsonb,
-  status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
+  status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
   visited_count INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0,
   duplicates_skipped INTEGER NOT NULL DEFAULT 0,
@@ -28,12 +28,14 @@ CREATE TABLE IF NOT EXISTS crawl_urls (
       'FORBIDDEN',
       'NOT_FOUND',
       'HTTP_TERMINAL',
-      'FAILED'
+      'FAILED',
+      'CANCELLED'
     )
   ),
   claimed_at TIMESTAMPTZ,
   claimed_by_worker TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
+  retry_after_at TIMESTAMPTZ,
   last_error TEXT,
   http_status INTEGER,
   content_type TEXT,

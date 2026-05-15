@@ -3,7 +3,9 @@ import { fetch as undiciFetch, request } from "undici";
 import {
   classifyExecutionError,
   classifyHttpResponse,
-  type CrawlJobPayload
+  type CrawlJobPayload,
+  type LegacyCrawlJobPayload,
+  topUpRunSignals
 } from "@crawler/shared";
 import { buildRequestHeaders, logW } from "../config";
 import { retryAfterFromUndiciHeaders } from "../fetch/undiciHeaders";
@@ -15,16 +17,15 @@ import {
   crawlQueueLatencySeconds,
   processedUrlsTotal
 } from "../prometheus";
+import { crawlJobQueue } from "../queue";
 import {
-  claimUrl,
+  claimNextQueuedUrl,
+  hasClaimableQueuedUrls,
   markFailed,
   markRedirectOutOfScope,
   markVisited
 } from "../repositories/urlClaimRepository";
-import {
-  markDiscoveredUrlsEnqueued,
-  storeDiscoveredUrls
-} from "../repositories/urlDiscoveryRepository";
+import { storeDiscoveredUrls } from "../repositories/urlDiscoveryRepository";
 import { getRunContext, isUrlInScope } from "../runContext";
 import {
   shouldCooldownForExecutionClassification,
@@ -33,12 +34,27 @@ import {
 import { fetchGateway, hostCooldown, hostPacer } from "../workerDeps";
 import { markFailedOrRetryFromError, markFailedOrRetryFromResponse } from "./retryPolicy";
 
+function isLegacyUrlJobPayload(payload: CrawlJobPayload | LegacyCrawlJobPayload): boolean {
+  return "urlId" in payload && typeof (payload as LegacyCrawlJobPayload).urlId === "number";
+}
+
+async function maybeTopUpRunSignals(crawlRunId: number): Promise<void> {
+  if (await hasClaimableQueuedUrls(crawlRunId)) {
+    await topUpRunSignals(crawlJobQueue, crawlRunId);
+  }
+}
+
 export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> {
   const payload = job.data;
+  if (isLegacyUrlJobPayload(payload)) {
+    logW(payload.crawlRunId, 0, "skip-legacy-url-job");
+    return;
+  }
+
   const queueLatencySec = Math.max(0, (Date.now() - job.timestamp) / 1000);
   crawlQueueLatencySeconds.observe(queueLatencySec);
 
-  const claimed = await claimUrl(payload.urlId, payload.crawlRunId);
+  const claimed = await claimNextQueuedUrl(payload.crawlRunId);
   if (!claimed) {
     return;
   }
@@ -133,6 +149,7 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
           runContext.config.maxRetries,
           retryAfterHeader
         );
+        await maybeTopUpRunSignals(claimed.crawl_run_id);
         return;
       }
 
@@ -146,6 +163,7 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
           contentType,
           resolution
         );
+        await maybeTopUpRunSignals(claimed.crawl_run_id);
         return;
       }
 
@@ -155,6 +173,7 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
           .includes("text/html")
       ) {
         await markVisited(claimed.crawl_run_id, claimed.id, statusCode, contentType, resolution);
+        await maybeTopUpRunSignals(claimed.crawl_run_id);
         return;
       }
 
@@ -173,12 +192,14 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
           err,
           runContext.config.maxRetries
         );
+        await maybeTopUpRunSignals(claimed.crawl_run_id);
         return;
       }
 
       if (claimed.depth >= runContext.config.maxDepth) {
         await markVisited(claimed.crawl_run_id, claimed.id, statusCode, contentType, resolution);
         logW(claimed.crawl_run_id, claimed.id, "complete mode=max_depth");
+        await maybeTopUpRunSignals(claimed.crawl_run_id);
         return;
       }
 
@@ -193,6 +214,7 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
           statusCode,
           contentType
         );
+        await maybeTopUpRunSignals(claimed.crawl_run_id);
         return;
       }
 
@@ -203,15 +225,14 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
         claimed.depth + 1,
         runContext.config.maxPages
       );
-      await markDiscoveredUrlsEnqueued(claimed.crawl_run_id, stored.inserted);
       await markVisited(claimed.crawl_run_id, claimed.id, statusCode, contentType, resolution);
+      await maybeTopUpRunSignals(claimed.crawl_run_id);
       logW(
         claimed.crawl_run_id,
         claimed.id,
         `complete mode=html discovered=${pairs.length} inserted=${stored.inserted.length}`
       );
     } finally {
-      // Keep timeout active across the full request+redirect+body lifecycle.
       clearTimeout(timeoutHandle);
     }
   } catch (err) {
@@ -227,6 +248,7 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
       err,
       runContext.config.maxRetries
     );
+    await maybeTopUpRunSignals(claimed.crawl_run_id);
   } finally {
     processingTimer();
     processedUrlsTotal.inc();

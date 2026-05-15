@@ -11,26 +11,64 @@ export type ClaimedUrl = {
   depth: number;
 };
 
-export async function claimUrl(urlId: number, crawlRunIdHint: number): Promise<ClaimedUrl | null> {
-  logW(crawlRunIdHint, urlId, "claim-attempt");
+const ACTIVE_URL_CLAIM_SQL = `
+  u.id = $1
+  AND u.crawl_run_id = r.id
+  AND u.status = 'IN_PROGRESS'
+  AND r.status = 'RUNNING'
+`;
+
+export async function hasClaimableQueuedUrls(crawlRunId: number): Promise<boolean> {
   const res = await pgPool.query(
     `
-      UPDATE crawl_urls
+    SELECT EXISTS (
+      SELECT 1
+      FROM crawl_urls u
+      INNER JOIN crawl_runs r ON r.id = u.crawl_run_id
+      WHERE u.crawl_run_id = $1
+        AND r.status = 'RUNNING'
+        AND u.status = 'QUEUED'
+        AND (u.retry_after_at IS NULL OR u.retry_after_at <= NOW())
+    ) AS claimable
+    `,
+    [crawlRunId]
+  );
+  return Boolean(res.rows[0]?.claimable);
+}
+
+export async function claimNextQueuedUrl(crawlRunId: number): Promise<ClaimedUrl | null> {
+  logW(crawlRunId, 0, "claim-next-attempt");
+  const res = await pgPool.query(
+    `
+      WITH candidate AS (
+        SELECT u.id
+        FROM crawl_urls u
+        INNER JOIN crawl_runs r ON r.id = u.crawl_run_id
+        WHERE u.crawl_run_id = $1
+          AND r.status = 'RUNNING'
+          AND u.status = 'QUEUED'
+          AND (u.retry_after_at IS NULL OR u.retry_after_at <= NOW())
+        ORDER BY u.id
+        LIMIT 1
+        FOR UPDATE OF u SKIP LOCKED
+      )
+      UPDATE crawl_urls u
       SET status = 'IN_PROGRESS',
           claimed_at = NOW(),
-          claimed_by_worker = $2
-      WHERE id = $1
-        AND status = 'QUEUED'
-      RETURNING id, crawl_run_id, normalized_url, retry_count, depth
+          claimed_by_worker = $2,
+          retry_after_at = NULL
+      FROM candidate
+      WHERE u.id = candidate.id
+      RETURNING u.id, u.crawl_run_id, u.normalized_url, u.retry_count, u.depth
     `,
-    [urlId, workerId]
+    [crawlRunId, workerId]
   );
   if (res.rowCount) {
     const row = res.rows[0] as ClaimedUrl;
-    logW(row.crawl_run_id, row.id, "claim-success");
+    logW(row.crawl_run_id, row.id, "claim-next-success");
     return row;
   }
-  logW(crawlRunIdHint, urlId, "claim-skip reason=not_queued");
+  logW(crawlRunId, 0, "claim-next-skip reason=no_claimable_queued_url");
   return null;
 }
 
@@ -41,9 +79,9 @@ export async function markVisited(
   contentType: string | null,
   resolution: RedirectResolution
 ): Promise<void> {
-  await pgPool.query(
+  const res = await pgPool.query(
     `
-      UPDATE crawl_urls
+      UPDATE crawl_urls u
       SET status = CASE WHEN $6 THEN 'REDIRECT_FOLLOWED' ELSE 'VISITED' END,
           last_error = NULL,
           http_status = $2,
@@ -55,7 +93,8 @@ export async function markVisited(
           visited_at = NOW(),
           claimed_at = NULL,
           claimed_by_worker = NULL
-      WHERE id = $1
+      FROM crawl_runs r
+      WHERE ${ACTIVE_URL_CLAIM_SQL}
     `,
     [
       urlId,
@@ -67,6 +106,10 @@ export async function markVisited(
       resolution.finalInScope
     ]
   );
+  if (!res.rowCount) {
+    logW(crawlRunId, urlId, "mark-visited-skip reason=not_in_progress_or_run_not_running");
+    return;
+  }
   crawlUrlsVisitedTotal.inc();
   logW(
     crawlRunId,
@@ -82,19 +125,24 @@ export async function markFailed(
   httpStatus: number | null,
   contentType: string | null
 ): Promise<void> {
-  await pgPool.query(
+  const res = await pgPool.query(
     `
-      UPDATE crawl_urls
+      UPDATE crawl_urls u
       SET status = 'FAILED',
           last_error = $2,
           http_status = $3,
           content_type = $4,
           claimed_at = NULL,
           claimed_by_worker = NULL
-      WHERE id = $1
+      FROM crawl_runs r
+      WHERE ${ACTIVE_URL_CLAIM_SQL}
     `,
     [urlId, message, httpStatus, contentType]
   );
+  if (!res.rowCount) {
+    logW(crawlRunId, urlId, "mark-failed-skip reason=not_in_progress_or_run_not_running");
+    return;
+  }
   crawlUrlsFailedTotal.inc();
   logW(crawlRunId, urlId, `terminal-failure reason="${message}"`);
 }
@@ -107,19 +155,24 @@ export async function markTerminalHttpOutcome(
   httpStatus: number | null,
   contentType: string | null
 ): Promise<void> {
-  await pgPool.query(
+  const res = await pgPool.query(
     `
-      UPDATE crawl_urls
+      UPDATE crawl_urls u
       SET status = $2,
           last_error = $3,
           http_status = $4,
           content_type = $5,
           claimed_at = NULL,
           claimed_by_worker = NULL
-      WHERE id = $1
+      FROM crawl_runs r
+      WHERE ${ACTIVE_URL_CLAIM_SQL}
     `,
     [urlId, terminalStatus, message, httpStatus, contentType]
   );
+  if (!res.rowCount) {
+    logW(crawlRunId, urlId, "mark-terminal-skip reason=not_in_progress_or_run_not_running");
+    return;
+  }
   logW(crawlRunId, urlId, `terminal-http status=${terminalStatus} reason="${message}"`);
 }
 
@@ -130,9 +183,9 @@ export async function markRedirectOutOfScope(
   contentType: string | null,
   resolution: RedirectResolution
 ): Promise<void> {
-  await pgPool.query(
+  const res = await pgPool.query(
     `
-      UPDATE crawl_urls
+      UPDATE crawl_urls u
       SET status = 'REDIRECT_OUT_OF_SCOPE',
           last_error = 'redirect_final_out_of_scope',
           http_status = $2,
@@ -144,9 +197,14 @@ export async function markRedirectOutOfScope(
           visited_at = NOW(),
           claimed_at = NULL,
           claimed_by_worker = NULL
-      WHERE id = $1
+      FROM crawl_runs r
+      WHERE ${ACTIVE_URL_CLAIM_SQL}
     `,
     [urlId, statusCode, contentType, resolution.requestedUrl, resolution.finalUrl]
   );
+  if (!res.rowCount) {
+    logW(crawlRunId, urlId, "mark-redirect-oos-skip reason=not_in_progress_or_run_not_running");
+    return;
+  }
   logW(crawlRunId, urlId, "complete status=REDIRECT_OUT_OF_SCOPE");
 }

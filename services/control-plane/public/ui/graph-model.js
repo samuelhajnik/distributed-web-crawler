@@ -2,6 +2,22 @@ function normalizeStatus(status) {
   return String(status ?? "").toUpperCase();
 }
 
+function readThemeCssVar(name, fallback) {
+  if (typeof document === "undefined") {
+    return fallback;
+  }
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+/** Theme-aware graph label/edge colors (reads CSS variables from the page). */
+export function getGraphThemeStyles() {
+  return {
+    nodeFont: readThemeCssVar("--color-graph-node-label", "#111111"),
+    edge: readThemeCssVar("--color-graph-edge", "#b6b6b6")
+  };
+}
+
 /**
  * Vis fill colors — one semantic meaning each (matches graph legend).
  * Borders for non-root nodes use borderDefault; root keeps a purple outline for the seed URL.
@@ -16,7 +32,8 @@ export const GRAPH_NODE_PALETTE = {
   forbidden: { bg: "#facc15", borderDefault: "#eab308" },
   notFound: { bg: "#0369a1", borderDefault: "#075985" },
   httpTerminal: { bg: "#7c3aed", borderDefault: "#6d28d9" },
-  failed: { bg: "#b91c1c", borderDefault: "#991b1b" }
+  failed: { bg: "#b91c1c", borderDefault: "#991b1b" },
+  cancelled: { bg: "#6b7280", borderDefault: "#4b5563" }
 };
 
 function formatNodeStatusLabel(status, httpStatus) {
@@ -38,6 +55,9 @@ function formatNodeStatusLabel(status, httpStatus) {
   }
   if (s === "HTTP_TERMINAL") {
     return httpStatus ? `Other HTTP (${httpStatus})` : "Other HTTP";
+  }
+  if (s === "CANCELLED") {
+    return "Cancelled";
   }
   return String(status ?? "");
 }
@@ -68,6 +88,9 @@ export function classifyGraphNodeKind(row) {
   if (s === "FAILED") {
     return "failed";
   }
+  if (s === "CANCELLED") {
+    return "cancelled";
+  }
   if (s === "VISITED" || s === "COMPLETED" || s === "SUCCEEDED") {
     return "visited";
   }
@@ -97,6 +120,7 @@ export function buildLineageGraph(urlsPayload, graphPayload) {
   const rows = urlsPayload?.urls ?? [];
   const edgesRaw = graphPayload?.edges ?? [];
   const nodeMeta = new Map(rows.map((r) => [Number(r.id), r]));
+  const graphTheme = getGraphThemeStyles();
 
   const nodes = rows.map((r) => {
     const isRoot = r.discovered_from_url_id == null;
@@ -110,7 +134,7 @@ export function buildLineageGraph(urlsPayload, graphPayload) {
         background,
         border
       },
-      font: { color: "#111", size: 11 },
+      font: { color: graphTheme.nodeFont, size: 11 },
       title: formatNodeInfo(r),
       meta: r
     };
@@ -121,7 +145,7 @@ export function buildLineageGraph(urlsPayload, graphPayload) {
     from: Number(e.from_url_id),
     to: Number(e.to_url_id),
     arrows: "to",
-    color: { color: "#b6b6b6" }
+    color: { color: graphTheme.edge }
   }));
 
   return {

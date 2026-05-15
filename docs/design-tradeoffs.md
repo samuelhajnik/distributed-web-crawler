@@ -14,21 +14,27 @@ Short, defendable rationale for the architecture choices in this repository.
 
 ## 2) Redis / BullMQ instead of Kafka
 
-**Why:** In this repo, work units are small (`url_id`), throughput targets are modest, and delayed retries are straightforward to demonstrate with BullMQ.
+**Why:** Dispatch is modeled as **bounded run-level signals** (plus occasional delayed wakeup jobs), not one queue message per discovered URL. Throughput targets are modest, and BullMQ makes **delayed retries** and cross-process scheduling easy to demonstrate without building a custom wakeup scheduler.
 
-Kafka would be more appropriate for different requirements, such as much higher event volume, multi-consumer replay, or stream-processing workflows. Those requirements are outside this repository's scope, so BullMQ keeps retries and job dispatch easier to inspect.
+Kafka would be more appropriate for different requirements, such as much higher event volume, multi-consumer replay, or stream-processing workflows. Those requirements are outside this repository's scope, so BullMQ keeps scheduling and operator ergonomics simple.
 
 ## 3) Why not Postgres alone as the queue?
 
-**Possible pattern:** `SKIP LOCKED` dequeue from a `crawl_urls` table.
+**Possible pattern:** continuous `SKIP LOCKED` dequeue polling from `crawl_urls`.
 
 **Why this implementation still uses BullMQ:**
 
-- delayed job and backoff semantics are available out of the box,
-- workers can consume horizontally without relying on continuous DB dequeue polling,
-- transport concerns stay separated from durable crawl state.
+- **bounded wakeups** reduce tight polling loops while workers sit idle,
+- **delayed jobs** provide timely retry wakeups without scanning `retry_after_at` from every worker on a short interval,
+- **bounded dispatch (`DISPATCH_SIGNALS_PER_RUN`)** caps Redis fan-out per run while keeping some fairness across concurrent runs on a shared pool,
+- transport stays separated from durable crawl state.
 
-**Trade-off:** enqueue-after-commit is best-effort, so this repo pairs it with **reconciliation** to re-publish `QUEUED` rows.
+**Trade-offs:**
+
+- Cross-run fairness is **not** strict round-robin; behavior depends on shared worker capacity, BullMQ ordering, and **process-local** host pacing.
+- The **Postgres claim path is central**: correctness lives in SQL transitions and guards; Redis only prompts work.
+
+**Enqueue-after-commit** remains best-effort for signals; **reconciliation tops up bounded run signals** when Postgres shows claimable `QUEUED` rows (not “replay every row” into Redis).
 
 ## 4) Why not a fully distributed ownership model without centralized durable state?
 
@@ -46,7 +52,7 @@ We keep normalization **conservative** and document it explicitly.
 
 This design optimizes for:
 
-- clear **correctness properties under concurrency and failure** (atomic claim + reconciliation + lease recovery),
+- clear **correctness properties under concurrency and failure** (atomic claim + bounded-signal reconciliation + lease recovery),
 - inspectable behavior (API + metrics + exports),
 - explainable trade-offs for a demo-sized implementation.
 

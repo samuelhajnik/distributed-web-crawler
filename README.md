@@ -2,19 +2,21 @@
 
 [![CI](https://github.com/samuelhajnik/distributed-web-crawler/actions/workflows/ci.yml/badge.svg)](https://github.com/samuelhajnik/distributed-web-crawler/actions/workflows/ci.yml)
 
-This repository is a small distributed crawler built to explore a specific systems question: how to keep crawl state durable and inspectable while work is executed asynchronously across multiple workers.
+This repository is a distributed crawler focused on durable crawl state, bounded asynchronous dispatch, restart recovery, cancellation, and live crawl inspection.
 
-In this implementation, Postgres stores the canonical frontier, Redis/BullMQ handles job dispatch, and a control plane runs reconciliation plus stale-lease recovery. The scope is intentionally narrower than a full production crawler; the focus is on making concurrency and failure behavior explicit and testable.
+Postgres owns the canonical crawl frontier. Redis/BullMQ is intentionally limited to a bounded dispatch signal layer rather than becoming a second copy of the frontier. Workers consume run-level signals and claim concrete URL work from Postgres at processing time. The control plane exposes run lifecycle APIs, reconciliation, stale-lease recovery, persisted crawl history, terminal cancellation, export/inspection endpoints, and a browser UI for observing the system while it runs.
 
-The main question in this repo is not raw crawl throughput. It is whether this design preserves clear invariants under concurrency: one logical URL row per run, atomic claiming, recovery of stranded work, and stable completion based on frontier state rather than transient queue emptiness.
+The goal is not maximum crawl throughput. The goal is to make the important distributed-systems boundaries explicit and testable: one logical URL row per run, atomic claiming, retry eligibility stored in the database, recovery of stranded work, cancellation that prevents new claims, and completion based on durable frontier state rather than transient Redis queue emptiness.
+
+The scope is intentionally narrower than a full production crawler, but the implementation is designed to make its trade-offs, failure modes, and correctness boundaries visible.
 
 ```mermaid
 flowchart LR
   subgraph CP[Control plane]
     API[REST + maintenance]
   end
-  PG[(PostgreSQL: frontier)]
-  RD[(Redis / BullMQ: queue)]
+  PG[(PostgreSQL: canonical frontier)]
+  RD[(Redis / BullMQ: bounded run signals)]
   W[Workers]
 
   API --> PG
@@ -23,28 +25,28 @@ flowchart LR
   W --> PG
 ```
 
-**Flow:** the control plane reads and updates Postgres, publishes jobs to Redis, and runs **reconciliation + lease-based stale recovery** so `QUEUED` rows are re-published and stale `IN_PROGRESS` rows can be reclaimed. Workers **consume Redis jobs, claim rows atomically in Postgres, fetch and parse, then write frontier updates back to Postgres**.
+**Flow:** the control plane updates Postgres and tops up bounded BullMQ run signals when claimable work exists. Workers consume one signal at a time, atomically claim one eligible URL row from Postgres, then fetch, parse, and persist frontier updates. Discovery inserts child URLs into Postgres and triggers signal top-ups. Reconciliation and lease-based stale recovery keep work from being stranded, while completion is derived from durable frontier counts rather than Redis queue emptiness.
 
-![Demo UI — completed crawl](docs/screenshots/demo-ui-lineage-graph.png)
+![Demo UI — full dashboard](docs/screenshots/demo-ui-full.png)
 
-_Demo UI — completed crawl with interactive lineage graph and URL inspection surfaces._
+_Dark-theme dashboard showing crawl start controls, persisted crawl history, active run state, lineage graph, and URL inspection._
 
 ## What this repo demonstrates
 
-- Durable crawl frontier state in Postgres (`crawl_runs`, `crawl_urls`) with queryable run metadata.
-- Async execution transport through Redis/BullMQ while frontier correctness remains DB-enforced.
-- Atomic `QUEUED -> IN_PROGRESS` claims ensure that at most one worker processes a given row at a time, even if the same job is delivered multiple times. This prevents concurrent duplicate processing, while allowing retries after failures (at-least-once semantics).
-- Reconciliation that re-enqueues `QUEUED` rows if Redis publication was missed.
-- Lease-based recovery (`claimed_at`, `claimed_by_worker`) for stale in-flight work.
-- Completion is determined from frontier state (`QUEUED=0`, `IN_PROGRESS=0`) observed across consecutive maintenance cycles, rather than queue emptiness.
+- **Durable crawl frontier** — `crawl_runs` and `crawl_urls` store run metadata, URL state, lineage, retries, and terminal outcomes in Postgres.
+- **Bounded async dispatch** — Redis/BullMQ carries run-level dispatch signals instead of mirroring every queued URL; workers claim concrete URL work from Postgres.
+- **Concurrency-safe processing** — atomic `QUEUED → IN_PROGRESS` transitions ensure only one worker processes a URL row at a time, even under duplicate signal delivery.
+- **Recovery and reconciliation** — stale leases are reclaimed and missing dispatch signals are topped up when claimable work exists.
+- **Retry and cancellation semantics** — `retry_after_at` preserves per-URL backoff in Postgres; cancellation is terminal and prevents new claims for cancelled runs.
+- **Operational demo UI** — crawl history, Load/Cancel actions, live run state, graph lineage, node details, URL table, and light/dark themes make the system inspectable during execution.
 
 ## Reviewer path
 
 A quick path through the repo:
 
 1. Bring the stack up (`docker compose up --build`; see **Run with Docker Compose**).
-2. Start a crawl via the demo UI (`http://localhost:3000/ui/`), `POST /crawl-runs`, or `scripts/crawl-start.sh`.
-3. Inspect run state: `GET /crawl-runs/:id/summary`, the UI, or `scripts/crawl-summary.sh <id>`.
+2. Start a crawl via the demo UI (`http://localhost:3000/ui/`), `POST /crawl-runs`, or `scripts/crawl-start.sh`; use **Crawl History → Load** to attach to an existing persisted run (restart recovery in the UI).
+3. Inspect run state: `GET /crawl-runs/:id/summary`, the UI, or `scripts/crawl-summary.sh <id>`; cancel an active run with **`POST /crawl-runs/:id/cancel`** or the UI action when applicable.
 4. Inspect URLs and lineage: **Demo UI**, `GET /crawl-runs/:id/urls`, `GET /crawl-runs/:id/graph`, or `/export`.
 5. (Optional) Scale workers and compare exports—**Single-worker vs multi-worker comparison**, `npm run compare-results`, **End-to-end correctness tests**.
 
@@ -53,8 +55,8 @@ For design detail: [docs/architecture.md](docs/architecture.md). For metrics and
 ## Design choices in this implementation
 
 - **Postgres as canonical frontier** — In this repo, `crawl_urls` is the durable dedup and state-transition store, so run state is queryable and exportable.
-- **BullMQ as execution transport** — BullMQ is used here for dispatch and delayed retries; duplicate queue delivery is expected and resolved at DB claim time.
-- **Reconciliation instead of outbox** — This implementation accepts best-effort enqueue-after-commit and compensates for that gap with periodic re-enqueue of `QUEUED` rows.
+- **BullMQ as execution transport** — BullMQ carries bounded run signals and delayed wakeups; duplicate signal delivery is expected and resolved at DB claim time.
+- **Reconciliation instead of outbox** — Best-effort enqueue-after-commit is paired with periodic **top-ups of bounded run signals** when Postgres still shows claimable `QUEUED` rows (not bulk URL-job replay).
 - **Lease-based ownership (`claimed_at`, `claimed_by_worker`)** — Worker loss is handled by reclaiming stale `IN_PROGRESS` rows during maintenance.
 - **Per-run host scope** — `allowed_hosts` is derived from the seed (apex + `www.` pair only); link filtering is deterministic per run.
 - **Idempotent URL discovery + atomic claim** — Idempotent insertion (via uniqueness constraint) combined with atomic claim ensures one logical URL row per run.
@@ -62,18 +64,16 @@ For design detail: [docs/architecture.md](docs/architecture.md). For metrics and
 
 ## Correctness properties
 
-Under the **documented normalization and per-run host scope** (derived from the seed URL), this implementation is designed so that:
+Under the **documented normalization and per-run host scope** (derived from the seed URL), the implementation is designed to provide both safety and liveness properties:
 
-These properties cover both safety (no concurrent duplicate row-level processing) and liveness (eventual completion under bounded retries and stable conditions).
-
-- **Discovered URLs are durably stored in Postgres once inserted, and reconciliation plus lease recovery ensure they are not permanently stranded.**
-- **Duplicate discoveries are deduplicated at insert time via a uniqueness constraint, and atomic claiming ensures that only one worker processes a row at a time.**
-- **Multi-worker execution converges to the same normalized URL set as single-worker execution under the same normalization and host-scope rules.**
-- **Under bounded retries and stable dependencies, frontier rows transition to terminal states (`VISITED`, `REDIRECT_301`, `FORBIDDEN`, `NOT_FOUND`, `HTTP_TERMINAL`, or `FAILED`), allowing the run to complete.**
+- **Durable discovery:** discovered URLs are stored in Postgres once inserted, and reconciliation plus lease recovery keep claimable work from being permanently stranded.
+- **Single-row ownership:** duplicate discoveries are deduplicated at insert time, and atomic claiming ensures only one worker processes a URL row at a time.
+- **Deterministic comparison path:** multi-worker execution converges to the same normalized URL set as single-worker execution under the same normalization and host-scope rules.
+- **Terminal frontier semantics:** under bounded retries and stable dependencies, frontier rows transition to terminal URL statuses (including `VISITED`, redirect/outcome terminals, `HTTP_TERMINAL`, `FAILED`, or **`CANCELLED`** after cancellation), allowing the run to reach a terminal run status when active work is stably drained.
 
 Reviewers can verify these properties using the export/summary APIs, the E2E fixture tests, and the comparison workflow (`npm run compare-results`).
 
-**Mechanisms reviewers can rely on:** DB uniqueness, **atomic claim**, **reconciliation loop**, **lease-based recovery**, and the **export comparison** workflow.
+**Mechanisms reviewers can rely on:** DB uniqueness, **atomic claim**, **`retry_after_at` eligibility**, **bounded run-signal reconciliation**, **lease-based recovery**, and the **export comparison** workflow.
 
 ## Scope and limitations
 
@@ -103,15 +103,15 @@ See [docs/architecture.md](docs/architecture.md) for a URL state machine, data m
 - **Control plane**: REST API, periodic maintenance (stale lease recovery + reconciliation), stable completion detection, Prometheus `/metrics`.
 - **Workers**: BullMQ consumers, gated HTTP fetch + HTML link extraction, DB writes, Prometheus `/metrics` on `9091` by default.
 - **Postgres**: canonical frontier (`crawl_urls`) and run metadata (`crawl_runs`).
-- **Redis/BullMQ**: schedules `{ crawl_run_id, url_id }` jobs; duplicates are acceptable because claim is atomic.
+- **Redis/BullMQ**: carries bounded run-level dispatch signals (payload is **`crawlRunId` + slot index**, never a URL id); workers claim concrete URL work from Postgres at processing time. BullMQ is not a full copy of the frontier.
 
 ### Crawl lifecycle (summary)
 
-1. `POST /crawl-runs` with `seedUrl` creates the run, inserts the normalized seed as `QUEUED`, and best-effort enqueues.
+1. `POST /crawl-runs` with `seedUrl` creates the run, inserts the normalized seed as `QUEUED`, and enqueues bounded run-level dispatch signals.
 2. Worker atomically claims `QUEUED → IN_PROGRESS` (lease: `claimed_at`, `claimed_by_worker`).
 3. On success: persist HTTP metadata, mark `VISITED`, insert discovered children (`raw_url`, `discovered_from_url_id`) with dedup constraint.
-4. On retryable failure: `IN_PROGRESS → QUEUED` with backoff delay and BullMQ delayed job.
-5. Control plane maintenance: recover stale leases; re-enqueue all `QUEUED` rows (compensates for the DB-commit / enqueue gap).
+4. On retryable failure: `IN_PROGRESS → QUEUED` with `retry_after_at` backoff and a delayed run-level signal.
+5. Control plane maintenance: recover stale leases; top up bounded run signals when claimable `QUEUED` rows exist (compensates for the DB-commit / enqueue gap).
 6. Completion: empty frontier (`QUEUED=0`, `IN_PROGRESS=0`) for **two consecutive** maintenance cycles after recovery + reconciliation.
 
 ### URL normalization / filtering policy
@@ -127,15 +127,23 @@ See [docs/architecture.md](docs/architecture.md) for a URL state machine, data m
 
 HTTP outcomes are classified in `packages/shared` (`classifyHttpResponse`); transport/runtime outcomes use `classifyExecutionError`. URL-level retries are bounded by per-run **`maxRetries`** (defaults from env **`MAX_RETRIES`** via the control plane).
 
+**`retry_after_at` (Postgres):** On retryable failure the worker sets the row back to `QUEUED`, bumps `retry_count`, and writes **`retry_after_at = now + delay`**. **`claimNextQueuedUrl`** (and equivalent SQL) only selects **`QUEUED`** rows whose **`retry_after_at` is null or ≤ now**, so backoff semantics stay correct even though BullMQ only carries **run-level** signals. A **delayed BullMQ wake signal** may also be scheduled so workers revisit the run near eligibility time; missing wakes still converge via reconciliation + claim rules.
+
 - **2xx + HTML**: parse links, insert children, mark `VISITED`.
 - **2xx non-HTML**: mark `VISITED`, no link extraction.
 - **301**: terminal `REDIRECT_301`.
 - **403**: terminal `FORBIDDEN` (request completed; access denied by target).
 - **404**: terminal `NOT_FOUND`.
 - **5xx**: classified **retryable**; the URL is re-queued with backoff until **`maxRetries`** is exhausted, then terminal **`HTTP_TERMINAL`**.
-- **408**, **421**, **425**, **429**: classified **retryable** like **5xx**; the URL is re-queued with backoff until **`maxRetries`** is exhausted, then terminal **`HTTP_TERMINAL`** with the recorded HTTP status. For **429** only, when the response includes a valid **`Retry-After`** header (seconds or HTTP-date), the BullMQ job delay uses the **greater** of normal backoff and that hint, capped by **`RETRY_MAX_DELAY_MS`**; invalid or missing **`Retry-After`** falls back to backoff only. **Process-local host cooldown** still applies after a **429** (see **Fetch concurrency / politeness**).
+- **408**, **421**, **425**, **429**: classified **retryable** like **5xx**; the URL is re-queued with backoff until **`maxRetries`** is exhausted, then terminal **`HTTP_TERMINAL`** with the recorded HTTP status. For **429** only, when the response includes a valid **`Retry-After`** header (seconds or HTTP-date), the **computed retry delay** uses the **greater** of normal backoff and that hint, capped by **`RETRY_MAX_DELAY_MS`** (stored in **`retry_after_at`** and optionally paired with a delayed run wake signal); invalid or missing **`Retry-After`** falls back to backoff only. **Process-local host cooldown** still applies after a **429** (see **Fetch concurrency / politeness**).
 - **Other 3xx/4xx** not listed above (e.g. **401**, **410**): terminal **`HTTP_TERMINAL`**; **not** URL-retried.
 - **Crawler-side failures** (no completed HTTP response, transport/DNS, runtime/parser errors): terminal **`FAILED`** when retries are exhausted; cases classified **retryable** (including many network/timeout errors and **AbortController** request-timeout aborts when classified as retryable) are re-queued until **`maxRetries`** is exhausted.
+
+### Cancellation
+
+- **`CANCELLED` is terminal** once applied (no resume path in this demo). **`POST /crawl-runs/:id/cancel`** only mutates **`RUNNING`** runs: it sets **`crawl_runs.status = CANCELLED`**, **`completed_at`**, and updates **`QUEUED`** / **`IN_PROGRESS`** rows to **`CANCELLED`** (clearing leases). **`COMPLETED` / `FAILED` / `CANCELLED`** runs return without changes (`changed: false`).
+- **Dispatch signals may still be present in Redis briefly** and can drain harmlessly: workers resolve run context first and **claim SQL requires an active `RUNNING` run**, so non-running runs yield **no claimed URL work**.
+- **In-flight HTTP work cannot be aborted through this API alone**; guarded finalize paths avoid overwriting rows already **`CANCELLED`** when late responses return.
 
 ### Completion detection
 
@@ -145,41 +153,47 @@ After each maintenance cycle: recover stale → reconcile → read counts → up
 
 `crawl_runs` includes: `seed_url` (caller input), `normalized_seed_url`, `root_url` (canonical normalized seed, same value as `normalized_seed_url`), **`allowed_hosts`** (text array used for link filtering), plus status and counters.
 
-`crawl_urls` includes: `normalized_url`, optional `raw_url` (href as seen), optional `discovered_from_url_id`, lease fields, HTTP metadata, retries, timestamps.
+`crawl_urls` includes: `normalized_url`, optional `raw_url` (href as seen), optional `discovered_from_url_id`, lease fields, HTTP metadata, retries, **`retry_after_at`**, timestamps.
 
 ## Demo UI
 
-The control plane serves a minimal browser UI at `http://localhost:3000/ui/`. It is intentionally **polling-based** (no server push): the client periodically fetches JSON and re-renders **run summary**, an interactive **lineage graph** with **node-level inspection**, and a **paginated URL table** for run exploration and verification.
-
-![Demo UI — run summary](docs/screenshots/demo-ui-run-summary.png)
-
-_Start a crawl and inspect live run counters and final status._
+The control plane serves a minimal browser UI at `http://localhost:3000/ui/`. It is **polling-based** (no server push). Use the **theme** control for **light or dark** styling. **Start / seed URL** begins a new crawl; **Crawl History** lists persisted runs with **Load** (attach the inspector after refresh) and **Cancel** on **`RUNNING`** rows. The inspector shows **run state**, live counters, **normalized seed URL**, an interactive **lineage graph** (pan, zoom, fit), **node detail** on selection, and a **paginated URL table**.
 
 ### Graph evolution during a run
 
-The lineage graph is most useful while the crawl is still active, because the discovered structure becomes visible as the frontier expands.
+While a crawl is active, the graph fills in as the frontier grows.
+
+#### Early stage
 
 ![Demo UI — graph early](docs/screenshots/demo-ui-graph-early.png)
 
-_Early stage — the crawl begins expanding outward from the seed URL._
+_The crawl begins expanding outward from the seed URL._
+
+#### Mid-run
 
 ![Demo UI — graph mid](docs/screenshots/demo-ui-graph-mid.png)
 
-_Mid-run — more branches and terminal outcomes become visible as the crawl progresses._
+_More branches and terminal outcomes become visible as the crawl progresses._
+
+#### Final stage
 
 ![Demo UI — graph late](docs/screenshots/demo-ui-graph-large.png)
 
-_Late stage — the graph captures the complete discovered structure of the run, including major branches and terminal results._
+_The graph captures the complete discovered structure of the run, including major branches and terminal results._
 
-![Demo UI — node detail inspection](docs/screenshots/demo-ui-node-detail.png)
+#### Node inspection
 
-_Graph node inspection — selecting a discovered URL reveals per-node metadata such as status, depth, parent lineage (`discovered_from_url_id`), retry count, and terminal error classification, while keeping the surrounding crawl structure visible._
+![Demo UI — node detail](docs/screenshots/demo-ui-node-detail.png)
+
+_Selecting a discovered URL reveals per-node metadata such as status, depth, parent lineage (`discovered_from_url_id`), retry count, and terminal classification while keeping the surrounding crawl structure visible._
+
+#### URL table
 
 ![Demo UI — URL table](docs/screenshots/demo-ui-urls-table.png)
 
-_Paginated URL inspection view with status, depth, lineage, and terminal outcome details._
+_Paginated URL inspection with status, depth, lineage, and terminal outcome details._
 
-**Behavior notes:** **Run status and counters** come from `/crawl-runs/:id/summary` (~every **1.5s** while a run is active). The **URL table** uses the same loop with **200** rows per page (`limit`/`offset`), **Previous** / **Next**, and refreshes the current page without jumping to page 1. **Lineage graph** polling is separate and loads up to **50,000** URL rows from `/urls` plus a matching `/graph` edge limit. **Graph refresh interval** is configurable in the UI (**1–10s**, default **3s**); it only affects browser polling, not `run_config`.
+**Behavior notes:** **Crawl history** polls **`GET /crawl-runs?limit=…`** so persisted runs appear after refresh; **Load** binds the inspector to a chosen `id`. **Run status and counters** come from `/crawl-runs/:id/summary` (~every **1.5s** while a run is active). The **URL table** uses the same loop with **200** rows per page (`limit`/`offset`), **Previous** / **Next**, and refreshes the current page without jumping to page 1. **Lineage graph** polling is separate and loads up to **50,000** URL rows from `/urls` plus a matching `/graph` edge limit. **Graph refresh interval** is configurable in the UI (**1–10s**, default **3s**); **fit/stabilization** behavior is tuned client-side for readability. Polling intervals affect only the browser, not `run_config`.
 
 Per-run settings from the UI/API are merged with **control-plane env defaults** for any omitted fields, then persisted on `crawl_runs.run_config` (`maxPages`, `maxDepth`, `scopeMode`, `includeDocuments`, `followRedirects`, `demoDelayMs`, `requestTimeoutMs`, `maxRetries`).
 
@@ -189,11 +203,13 @@ This UI remains lightweight and demo-focused; the polling layer can be swapped f
 
 ## What reviewers can verify
 
-- Duplicate queue delivery does not create duplicate URL rows because dedup + atomic claim gates processing, and URL lineage remains inspectable at node/table level in the UI.
+- Duplicate **signal** delivery does not double-process URLs because dedup + atomic claim gates processing; lineage stays inspectable in graph/table views.
 - Stale `IN_PROGRESS` work can be reclaimed through lease expiry and maintenance.
-- `QUEUED` rows missing from Redis are re-enqueued by reconciliation.
+- Claimable `QUEUED` rows still receive work because reconciliation **tops up bounded run signals** after enqueue gaps (without mirroring the frontier in Redis).
+- **`retry_after_at`** preserves backoff when signals arrive early.
+- Cancellation makes the run terminal and stops new claims while honoring guarded writes for late completions.
 - Multi-worker exports can be compared to single-worker exports under the same fixture/rules.
-- Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient queue emptiness, while final per-URL outcomes stay directly inspectable in graph/node views and the table.
+- Completion depends on stable frontier state (`QUEUED=0`, `IN_PROGRESS=0` across checks), not transient Redis emptiness.
 
 ## Tests
 
@@ -206,8 +222,10 @@ Vitest tests live in `packages/shared` for:
 
 - **normalization + host filtering** (`url.ts`, no DB side effects)
 - **retry / HTTP classification** (`classification.ts`)
-- **reconciliation job builder** (`reconciliation.ts`)
+- **bounded run-signal builders + `topUpRunSignals`** (`reconciliation.ts` — slot jobs, retry wake jobs, idempotent enqueue)
 - **Postgres semantics** for dedup + atomic claim using **in-memory `pg-mem`** (`dbConcurrency.pgmem.test.ts`)
+
+Control-plane tests (Vitest) additionally cover **crawl run listing**, **`POST /crawl-runs/:id/cancel`**, **claimable `QUEUED` selection with `retry_after_at`**, and related repository behavior (`services/control-plane/src/**/*.test.ts`).
 
 ## End-to-end correctness tests
 
@@ -239,16 +257,18 @@ TEST_GRAPH_SEED=91817 npm run test:e2e:generated
 
 ## API reference (inspection)
 
-| Method | Path                                      | Purpose                                                                           |
-| ------ | ----------------------------------------- | --------------------------------------------------------------------------------- |
-| `POST` | `/crawl-runs`                             | Start a crawl (JSON body with required `seedUrl` and optional per-run `settings`) |
-| `GET`  | `/crawl-runs/:id`                         | Status + triggers one maintenance pass                                            |
-| `GET`  | `/crawl-runs/:id/summary`                 | Aggregates + run meta                                                             |
-| `GET`  | `/crawl-runs/:id/urls`                    | Paginated URL rows (`status`, `limit`, `offset`, `sort`, `order`)                 |
-| `GET`  | `/crawl-runs/:id/export?format=json\|csv` | Export sample (default `limit=50000`, includes `id` + lineage fields)             |
-| `GET`  | `/crawl-runs/:id/graph`                   | Discovery edge list (`discovered_from_url_id → id`) for lineage inspection        |
-| `GET`  | `/metrics`                                | Prometheus (control-plane)                                                        |
-| `GET`  | `/health`                                 | Liveness                                                                          |
+| Method | Path                                      | Purpose                                                                               |
+| ------ | ----------------------------------------- | ------------------------------------------------------------------------------------- |
+| `GET`  | `/crawl-runs?limit=20`                    | List recent runs (`limit` default **20**, max **100**)                                |
+| `POST` | `/crawl-runs`                             | Start a crawl (JSON body with required `seedUrl` and optional per-run `settings`)     |
+| `POST` | `/crawl-runs/:id/cancel`                  | Terminal cancellation for a running crawl; queued/in-progress URLs become `CANCELLED` |
+| `GET`  | `/crawl-runs/:id`                         | Status + triggers one maintenance pass                                                |
+| `GET`  | `/crawl-runs/:id/summary`                 | Aggregates + run meta                                                                 |
+| `GET`  | `/crawl-runs/:id/urls`                    | Paginated URL rows (`status`, `limit`, `offset`, `sort`, `order`)                     |
+| `GET`  | `/crawl-runs/:id/export?format=json\|csv` | Export sample (default `limit=50000`, includes `id` + lineage fields)                 |
+| `GET`  | `/crawl-runs/:id/graph`                   | Discovery edge list (`discovered_from_url_id → id`) for lineage inspection            |
+| `GET`  | `/metrics`                                | Prometheus (control-plane)                                                            |
+| `GET`  | `/health`                                 | Liveness                                                                              |
 
 ### Start a crawl (`POST /crawl-runs`)
 
@@ -274,6 +294,18 @@ curl -sS -X POST http://localhost:3000/crawl-runs \
 
 The response includes `id`, `seed_url`, `normalized_seed_url`, `allowed_hosts`, `run_config`, `root_url`, and `status`. `GET /crawl-runs/:id` and `GET /crawl-runs/:id/summary` echo the same scope/config fields from Postgres.
 
+### List recent runs (`GET /crawl-runs`)
+
+```bash
+curl -sS "http://localhost:3000/crawl-runs?limit=20"
+```
+
+### Cancel a run (`POST /crawl-runs/:id/cancel`)
+
+```bash
+curl -sS -X POST "http://localhost:3000/crawl-runs/1/cancel"
+```
+
 ### URL list pagination
 
 `GET /crawl-runs/:id/urls?status=VISITED&limit=50&offset=0&sort=visited_at&order=desc`
@@ -298,7 +330,7 @@ curl -sS "http://localhost:3000/crawl-runs/1/export?format=csv&limit=50000" -o r
 
 ## Observability
 
-The repo includes local observability support through Prometheus metrics on both processes and structured worker logs with `crawl_run_id` / `url_id`. These signals are intended to make queueing, retries, lease recovery, and maintenance behavior visible during runs.
+The repo includes local observability support through Prometheus metrics on both processes and structured worker logs with `crawl_run_id` / `url_id`. These signals are intended to make **dispatch**, retries, lease recovery, and maintenance behavior visible during runs.
 
 **Endpoints**
 
@@ -310,22 +342,22 @@ Full narrative + failure-mode table: **[docs/observability.md](docs/observabilit
 
 ### What the key metrics mean
 
-| Metric                                                        | What it measures                                                                                                                                            |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crawl_fetch_duration_seconds` (worker histogram)             | Time from starting the gated HTTP request until response headers are available.                                                                             |
-| `crawl_processing_duration_seconds` (worker histogram)        | Wall time **after a successful claim** for the whole job (body read, parse, DB writes, enqueue children).                                                   |
-| `crawl_queue_latency_seconds` (worker histogram)              | `now - job.timestamp` when the job starts—queueing + scheduling delay before your worker thread picks it up.                                                |
-| `crawl_urls_retried_total` / `crawl_urls_failed_total`        | Retry vs terminal failure pressure on the frontier.                                                                                                         |
-| `crawl_stale_claims_recovered_total`                          | How often lease expiry saved work that would otherwise look “stuck in flight.”                                                                              |
-| `crawl_queue_reconciliation_*`                                | How aggressively the control plane is re-publishing `QUEUED` rows—your “enqueue gap” safety valve.                                                          |
-| `crawl_reconciliation_cycle_duration_seconds` (control plane) | Cost of one full maintenance sweep across active runs.                                                                                                      |
-| `processed_urls_total` (worker counter)                       | One tick per **claimed** URL job after `processJob` finishes (visited, failed, or re-queued for retry)—a coarse “we actually handled claimed work” counter. |
+| Metric                                                        | What it measures                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crawl_fetch_duration_seconds` (worker histogram)             | Time from starting the gated HTTP request until response headers are available.                                                                                                                                                                                           |
+| `crawl_processing_duration_seconds` (worker histogram)        | Wall time **after a successful claim** for handling that URL (body read, parse, DB writes including discovery inserts and run-signal top-ups).                                                                                                                            |
+| `crawl_queue_latency_seconds` (worker histogram)              | `now - job.timestamp` when the job starts—queueing + scheduling delay before your worker thread picks it up.                                                                                                                                                              |
+| `crawl_urls_retried_total` / `crawl_urls_failed_total`        | Retry vs terminal failure pressure on the frontier.                                                                                                                                                                                                                       |
+| `crawl_stale_claims_recovered_total`                          | How often lease expiry saved work that would otherwise look “stuck in flight.”                                                                                                                                                                                            |
+| `crawl_queue_reconciliation_*`                                | How often reconciliation **adds or replenishes bounded run-level dispatch signals** when Postgres shows claimable `QUEUED` work—the enqueue-gap safety valve (not one Redis job per URL row).                                                                             |
+| `crawl_reconciliation_cycle_duration_seconds` (control plane) | Cost of one full maintenance sweep across active runs.                                                                                                                                                                                                                    |
+| `processed_urls_total` (worker counter)                       | Increments once per **successful Postgres claim** after processing finishes for that URL (visited, terminal failure, or returned to `QUEUED` for retry)—coarse “claimed URL work completed” signal; **not** incremented when a run signal finds no eligible row to claim. |
 
 ### Interpreting the metrics
 
 - If **`crawl_fetch_duration_seconds` p95/p99 jumps** while processing stays flat → likely **network/TLS/origin slowness** (or saturation below your fetch gate), not your HTML/DB path.
 - If **`crawl_urls_retried_total` accelerates** with erratic fetch latency → **target instability** (5xx/429/timeouts) or aggressive rate limits; check classification and backoff settings.
-- If **`crawl_queue_reconciliation_*` churn rises** faster than `crawl_urls_visited_total` → **queue/Redis instability or worker starvation**: Postgres still has `QUEUED` rows, but work is not draining smoothly—pair with `crawl_queue_latency_seconds` and worker logs for the same `crawl_run_id`.
+- If **`crawl_queue_reconciliation_*` churn rises** faster than visit progress → **signals not turning into claims** (workers saturated, run not `RUNNING`, URLs waiting on **`retry_after_at`**, or Redis/control-plane issues)—pair with `crawl_queue_latency_seconds`, frontier gauges, and logs for the same `crawl_run_id`.
 - If **`crawl_stale_claims_recovered_total` spikes** after deploys or OOMs → **workers died mid-claim**; leases are doing their job—verify worker restarts and capacity.
 
 ## Operator scripts
@@ -405,7 +437,8 @@ Workers use several **independent** process-level knobs (set via environment whe
 
 | Variable                      | Role                                                                                                                                                                 | Default  | Trade-off                                                                                                                                                                 |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WORKER_CONCURRENCY`          | BullMQ: how many URL jobs run concurrently in this process                                                                                                           | **8**    | More jobs in flight → faster frontier drain and more parallel DB/network work; too high can overload the worker or the origin.                                            |
+| `WORKER_CONCURRENCY`          | BullMQ: how many run-signal jobs this process may handle concurrently                                                                                                | **8**    | More signals in flight → faster frontier drain; bounded per-run signals improve cross-run fairness.                                                                       |
+| `DISPATCH_SIGNALS_PER_RUN`    | Max outstanding run-level dispatch signals enqueued per crawl run                                                                                                    | **32**   | Caps Redis fan-out per run; one signal ≈ one claim opportunity from Postgres.                                                                                             |
 | `FETCH_CONCURRENCY`           | Global in-process cap on concurrent HTTP attempts (across those jobs)                                                                                                | **12**   | Separates “queue concurrency” from “socket concurrency”; raises ceiling for link-rich pages without necessarily opening more TCP connections than this cap.               |
 | `FETCH_CONCURRENCY_PER_HOST`  | Per-hostname cap within this process                                                                                                                                 | **4**    | Reduces accidental burst load on a single origin; still not a distributed politeness layer.                                                                               |
 | `FETCH_MIN_GAP_PER_HOST_MS`   | Minimum spacing between **scheduled starts** of outbound requests to the same hostname (plus jitter), before fetch concurrency gates                                 | **40**   | Demo-friendly smoothing on one origin; **process-local only**. Set to **0** to disable the gap (jitter-only still applies if `FETCH_GAP_JITTER_MS` is greater than zero). |
@@ -430,7 +463,7 @@ Discovery relationships are stored on `crawl_urls.discovered_from_url_id`.
 
 ## Scaling snapshot
 
-First bottlenecks are usually **Postgres write contention** on `crawl_urls`, **Redis/BullMQ throughput** for fan-out enqueue, **origin network latency** (especially when HTML is large), and **hot-domain skew** when many links point at the same host. At larger scale you would evolve **host/partition-aware sharding**, **read replicas or CQRS for inspection**, **stronger per-domain budgets**, and **optional transactional outbox** if you need to narrow reconciliation windows—see **[docs/scaling-and-bottlenecks.md](docs/scaling-and-bottlenecks.md)** and **[docs/design-tradeoffs.md](docs/design-tradeoffs.md)**.
+First bottlenecks are usually **Postgres write contention** on `crawl_urls` (canonical frontier), **Redis/BullMQ** only insofar as wake/dispatch signals and delayed retries scale with **active runs** rather than total discovered URLs, **origin network latency** (especially when HTML is large), and **hot-domain skew** when many links point at the same host. At larger scale you would evolve **host/partition-aware sharding**, **read replicas or CQRS for inspection**, **stronger per-domain budgets**, and **optional transactional outbox** if you need to narrow reconciliation windows—see **[docs/scaling-and-bottlenecks.md](docs/scaling-and-bottlenecks.md)** and **[docs/design-tradeoffs.md](docs/design-tradeoffs.md)**.
 
 ## Scaling limits & trade-offs (docs)
 

@@ -7,6 +7,7 @@ import {
   fetchMinGapPerHostMs
 } from "./workerDeps";
 import { crawlJobQueue } from "./queue";
+import { readDispatchSignalsPerRun } from "@crawler/shared";
 import {
   fetchGlobalMax,
   fetchPerHostMax,
@@ -43,7 +44,7 @@ http
   });
 
 process.stdout.write(
-  `[component=worker worker_id=${workerId}] started bullmq_concurrency=${workerConcurrency} fetch_concurrency=${fetchGlobalMax} fetch_per_host=${fetchPerHostMax} fetch_min_gap_per_host_ms=${fetchMinGapPerHostMs} fetch_gap_jitter_ms=${fetchGapJitterMs} fetch_host_cooldown_base_ms=${fetchHostCooldownBaseMs} fetch_host_cooldown_max_ms=${fetchHostCooldownMaxMs}\n`
+  `[component=worker worker_id=${workerId}] started bullmq_concurrency=${workerConcurrency} dispatch_signals_per_run=${readDispatchSignalsPerRun()} fetch_concurrency=${fetchGlobalMax} fetch_per_host=${fetchPerHostMax} fetch_min_gap_per_host_ms=${fetchMinGapPerHostMs} fetch_gap_jitter_ms=${fetchGapJitterMs} fetch_host_cooldown_base_ms=${fetchHostCooldownBaseMs} fetch_host_cooldown_max_ms=${fetchHostCooldownMaxMs}\n`
 );
 
 process.on("SIGINT", async () => {

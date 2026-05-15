@@ -11,13 +11,46 @@ const ALLOWED_STATUSES = new Set([
   "FORBIDDEN",
   "NOT_FOUND",
   "HTTP_TERMINAL",
-  "FAILED"
+  "FAILED",
+  "CANCELLED"
 ]);
 
+function parseListLimit(raw: unknown): number {
+  const n = Number(raw ?? 20);
+  if (Number.isNaN(n)) {
+    return 20;
+  }
+  return Math.min(100, Math.max(1, Math.floor(n)));
+}
+
 export function registerCrawlRunRoutes(app: Express, crawlRunService: CrawlRunService): void {
+  app.get("/crawl-runs", async (req, res) => {
+    try {
+      const limit = parseListLimit(req.query.limit);
+      const result = await crawlRunService.listCrawlRuns(limit);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   app.post("/crawl-runs", async (req, res) => {
     try {
       const result = await crawlRunService.createRun(req.body);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post("/crawl-runs/:id/cancel", async (req, res) => {
+    try {
+      const crawlRunId = Number(req.params.id);
+      if (Number.isNaN(crawlRunId)) {
+        res.status(400).json({ error: "Invalid run id" });
+        return;
+      }
+      const result = await crawlRunService.cancelCrawlRun(crawlRunId);
       res.status(result.status).json(result.body);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

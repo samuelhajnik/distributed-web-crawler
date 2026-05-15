@@ -16,10 +16,11 @@ export type UrlStatus =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "HTTP_TERMINAL"
-  | "FAILED";
-export type RunStatus = "RUNNING" | "COMPLETED" | "FAILED";
+  | "FAILED"
+  | "CANCELLED";
+export type RunStatus = "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
-export type { CrawlJobPayload } from "./types";
+export type { CrawlJobPayload, LegacyCrawlJobPayload } from "./types";
 
 const POSTGRES_HOST = process.env.POSTGRES_HOST ?? "localhost";
 const POSTGRES_PORT = Number(process.env.POSTGRES_PORT ?? 5432);
@@ -62,5 +63,14 @@ export { mergeRetryAfterWithBackoff, parseRetryAfterMs } from "./retryAfter";
 export type { CrawlRunConfig, ScopeMode } from "./crawlConfig";
 export { clampInt, DEFAULT_CRAWL_RUN_CONFIG } from "./crawlConfig";
 export { buildAllowedHostSet, normalizeAbsoluteUrl, normalizeUrl, parseSeedUrl } from "./url";
-export { buildCrawlBulkJobs } from "./reconciliation";
+export { readDispatchSignalsPerRun, DEFAULT_DISPATCH_SIGNALS_PER_RUN } from "./dispatchConfig";
+export {
+  buildRetryWakeSignalJob,
+  buildRunSignalJobs,
+  isDuplicateJobIdError,
+  retryWakeSignalJobId,
+  runSignalJobId,
+  RUN_SIGNAL_JOB_NAME,
+  topUpRunSignals
+} from "./reconciliation";
 export type { CrawlBulkJob } from "./reconciliation";

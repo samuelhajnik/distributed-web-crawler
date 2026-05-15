@@ -1,10 +1,9 @@
 import {
-  buildCrawlBulkJobs,
   CLAIM_STALE_SECONDS,
   createCrawlQueue,
   parseSeedUrl,
   pgPool,
-  RECONCILE_BATCH_SIZE
+  topUpRunSignals
 } from "@crawler/shared";
 import {
   crawlCompletionChecksTotal,
@@ -107,20 +106,54 @@ export class CrawlRunService {
     logCp(crawlRunId, `crawl-started url_id=${urlId} root=${parsed.normalized}`);
 
     try {
-      await this.queue.add(
-        "crawl-url",
-        { crawlRunId, urlId },
-        { removeOnComplete: 2000, removeOnFail: 2000 }
-      );
-      crawlUrlsRequeuedTotal.inc();
+      const signals = await topUpRunSignals(this.queue, crawlRunId);
+      if (signals > 0) {
+        crawlUrlsRequeuedTotal.inc();
+      }
+      logCp(crawlRunId, `run-signals-enqueued count=${signals} seed_url_id=${urlId}`);
     } catch (queueErr) {
-      logCp(
-        crawlRunId,
-        `initial-enqueue-failed url_id=${urlId} err=${(queueErr as Error).message}`
-      );
+      logCp(crawlRunId, `initial-run-signal-enqueue-failed err=${(queueErr as Error).message}`);
     }
 
     return { status: 201, body: { ...created, run_config: publicRunConfig(created.run_config) } };
+  }
+
+  async listCrawlRuns(limit: number): Promise<{ status: number; body: unknown }> {
+    const rows = await this.crawlRunRepository.listRecentWithTotals(limit);
+    return {
+      status: 200,
+      body: {
+        runs: rows.map((row) => {
+          const id = Number(row.id);
+          return {
+            crawl_run_id: id,
+            id,
+            status: row.status,
+            seed_url: row.seed_url,
+            root_url: row.root_url,
+            normalized_seed_url: row.normalized_seed_url,
+            started_at: row.started_at,
+            finished_at: row.completed_at,
+            completed_at: row.completed_at,
+            run_config: publicRunConfig(row.run_config),
+            totals: {
+              discovered: Number(row.discovered ?? 0),
+              visited: Number(row.visited ?? 0),
+              queued: Number(row.queued ?? 0),
+              in_progress: Number(row.in_progress ?? 0),
+              failed: Number(row.failed ?? 0),
+              cancelled: Number(row.cancelled ?? 0),
+              redirect_followed: Number(row.redirect_followed ?? 0),
+              redirect_out_of_scope: Number(row.redirect_out_of_scope ?? 0),
+              redirect_301: Number(row.redirect_301 ?? 0),
+              forbidden: Number(row.forbidden ?? 0),
+              not_found: Number(row.not_found ?? 0),
+              http_terminal: Number(row.http_terminal ?? 0)
+            }
+          };
+        })
+      }
+    };
   }
 
   async getRunSummary(crawlRunId: number): Promise<{ status: number; body: unknown }> {
@@ -152,9 +185,27 @@ export class CrawlRunService {
           not_found: a.total_not_found,
           http_terminal: a.total_http_terminal,
           failed: a.total_failed,
+          cancelled: a.total_cancelled,
           queued: a.total_queued,
           in_progress: a.total_in_progress
         }
+      }
+    };
+  }
+
+  async cancelCrawlRun(crawlRunId: number): Promise<{ status: number; body: unknown }> {
+    const result = await this.crawlRunRepository.cancelRun(crawlRunId);
+    if ("notFound" in result) {
+      return { status: 404, body: { error: "Run not found" } };
+    }
+    this.completionState.delete(crawlRunId);
+    return {
+      status: 200,
+      body: {
+        crawl_run_id: crawlRunId,
+        status: result.status,
+        changed: result.changed,
+        cancelled_url_count: result.cancelled_url_count
       }
     };
   }
@@ -229,7 +280,10 @@ export class CrawlRunService {
       return { status: 404, body: { error: "Run not found" } };
     }
 
-    const counts = await this.runMaintenanceForRun(crawlRunId);
+    const counts =
+      String(run.status) === "RUNNING"
+        ? await this.runMaintenanceForRun(crawlRunId)
+        : await this.crawlRunRepository.getRunCounts(crawlRunId);
     const refreshedRun = await this.crawlRunRepository.getById(crawlRunId);
     if (!refreshedRun) {
       return { status: 404, body: { error: "Run not found" } };
@@ -300,6 +354,10 @@ export class CrawlRunService {
   }
 
   async runMaintenanceForRun(crawlRunId: number): Promise<RunCounts> {
+    const run = await this.crawlRunRepository.getById(crawlRunId);
+    if (!run || String(run.status) !== "RUNNING") {
+      return this.crawlRunRepository.getRunCounts(crawlRunId);
+    }
     crawlQueueReconciliationCyclesTotal.inc();
     const recovered = await this.requeueStaleClaims(crawlRunId);
     const reconciled = await this.reconcileQueuedRows(crawlRunId);
@@ -374,28 +432,29 @@ export class CrawlRunService {
       logCp(crawlRunId, `stale-recovery count=${n}`);
     }
 
-    const staleJobs = buildCrawlBulkJobs(crawlRunId, staleIds);
-    if (staleJobs.length > 0) {
-      await this.queue.addBulk(staleJobs);
-      crawlUrlsRequeuedTotal.inc(staleJobs.length);
+    if (n > 0) {
+      const signals = await topUpRunSignals(this.queue, crawlRunId);
+      if (signals > 0) {
+        crawlUrlsRequeuedTotal.inc(signals);
+      }
+      logCp(crawlRunId, `stale-recovery run-signals-topped-up=${signals}`);
     }
 
     return n;
   }
 
   private async reconcileQueuedRows(crawlRunId: number): Promise<number> {
-    const queuedIds = await this.crawlUrlRepository.getQueuedUrlIds(
-      crawlRunId,
-      RECONCILE_BATCH_SIZE
-    );
-    const queuedJobs = buildCrawlBulkJobs(crawlRunId, queuedIds);
-    if (queuedJobs.length > 0) {
-      await this.queue.addBulk(queuedJobs);
-      crawlQueueReconciliationEnqueuedTotal.inc(queuedJobs.length);
-      crawlUrlsRequeuedTotal.inc(queuedJobs.length);
-      logCp(crawlRunId, `reconciliation enqueued=${queuedJobs.length}`);
+    const hasClaimable = await this.crawlUrlRepository.hasClaimableQueuedUrls(crawlRunId);
+    if (hasClaimable) {
+      const signals = await topUpRunSignals(this.queue, crawlRunId);
+      if (signals > 0) {
+        crawlQueueReconciliationEnqueuedTotal.inc(signals);
+        crawlUrlsRequeuedTotal.inc(signals);
+        logCp(crawlRunId, `reconciliation run-signals-topped-up=${signals}`);
+      }
+      return 1;
     }
-    return queuedIds.length;
+    return 0;
   }
 
   private async updateRunningRunGauges(): Promise<void> {

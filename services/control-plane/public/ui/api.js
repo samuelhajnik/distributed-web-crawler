@@ -17,8 +17,27 @@ export async function startCrawl(seedUrl, settings) {
   return readJsonOrThrow(resp, "start crawl");
 }
 
+export async function listCrawlRuns(limit = 20) {
+  const resp = await fetch(`/crawl-runs?limit=${limit}`);
+  return readJsonOrThrow(resp, "crawl runs");
+}
+
+export async function cancelCrawlRun(crawlRunId) {
+  const resp = await fetch(`/crawl-runs/${crawlRunId}/cancel`, { method: "POST" });
+  return readJsonOrThrow(resp, "cancel crawl");
+}
+
 export async function getSummary(crawlRunId) {
   const resp = await fetch(`/crawl-runs/${crawlRunId}/summary`);
+  return readJsonOrThrow(resp, "summary");
+}
+
+/** Returns null when the run does not exist (404). */
+export async function getSummaryIfExists(crawlRunId) {
+  const resp = await fetch(`/crawl-runs/${crawlRunId}/summary`);
+  if (resp.status === 404) {
+    return null;
+  }
   return readJsonOrThrow(resp, "summary");
 }
 

@@ -4,28 +4,66 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Distributed Crawler — Demo UI</title>
+    <script>
+      (function () {
+        var key = "crawler-ui-theme";
+        var saved = localStorage.getItem(key);
+        var theme = saved === "dark" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
   </head>
   <body>
     <main class="app">
       <header class="app-header">
-        <h1>Distributed Crawler</h1>
-        <p class="muted app-tagline">Demo UI — polling summary, lineage graph, and URL list.</p>
+        <div class="app-header-row">
+          <div class="app-header-text">
+            <div class="app-header-title-row">
+              <h1>Distributed Crawler</h1>
+              <span class="app-header-badge">Demo UI</span>
+            </div>
+            <p class="muted app-tagline">
+              A distributed crawler demo showing durable crawl state, fair worker dispatch, restart
+              recovery, cancellation, and live graph visibility.
+            </p>
+          </div>
+          <button
+            type="button"
+            id="theme-toggle"
+            class="btn-secondary theme-toggle"
+            aria-label="Switch to dark theme"
+          >
+            Dark
+          </button>
+        </div>
       </header>
 
       <section class="panel panel--start">
         <h2 class="panel-heading">Start Crawl</h2>
         <form id="start-form" class="start-form">
-          <div class="start-field start-field--full">
-            <label for="seed-url">Seed URL</label>
-            <input
-              id="seed-url"
-              name="seedUrl"
-              type="url"
-              required
-              placeholder="https://example.com/"
-            />
+          <div class="start-seed-row">
+            <div class="start-field start-field--seed">
+              <label for="seed-url">Seed URL</label>
+              <input
+                id="seed-url"
+                name="seedUrl"
+                type="url"
+                required
+                placeholder="https://example.com/"
+              />
+            </div>
+            <div class="start-field start-field--delay">
+              <label for="demo-delay-ms">Demo delay (ms)</label>
+              <input
+                id="demo-delay-ms"
+                type="number"
+                min="0"
+                value="0"
+                title="Extra delay between jobs for demos"
+              />
+            </div>
           </div>
           <div class="start-grid">
             <div class="start-field">
@@ -52,16 +90,6 @@
               ><input id="follow-redirects" type="checkbox" /> Follow redirects</label
             >
           </div>
-          <div class="start-field start-field--secondary">
-            <label for="demo-delay-ms">Demo delay (ms)</label>
-            <input
-              id="demo-delay-ms"
-              type="number"
-              min="0"
-              value="0"
-              title="Extra delay between jobs for demos"
-            />
-          </div>
           <details class="advanced">
             <summary>Advanced settings</summary>
             <div class="advanced-grid">
@@ -82,9 +110,35 @@
         <p id="start-status" class="start-status muted">No crawl started yet.</p>
       </section>
 
+      <section class="panel panel--history">
+        <h2 class="panel-heading panel-heading--history">Crawl History</h2>
+        <p id="history-status" class="history-status muted" aria-live="polite"></p>
+        <p id="history-loading" class="history-loading muted">Loading history…</p>
+        <div class="table-wrap table-wrap--history">
+          <table class="history-table" id="history-table">
+            <thead>
+              <tr>
+                <th class="hist-col-id">ID</th>
+                <th class="hist-col-status">Status</th>
+                <th class="hist-col-url">Seed URL</th>
+                <th class="hist-col-num">Disc.</th>
+                <th class="hist-col-num">Vis.</th>
+                <th class="hist-col-num">Que.</th>
+                <th class="hist-col-num">Prog.</th>
+                <th class="hist-col-num">Fail.</th>
+                <th class="hist-col-time">Started</th>
+                <th class="hist-col-time">Finished</th>
+                <th class="hist-col-action">Action</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="panel">
         <h2 class="panel-heading">Run State</h2>
-        <div class="stats-grid">
+        <div class="run-identity-row">
           <article class="stat-card">
             <span class="stat-label">Run ID</span>
             <span id="run-id" class="stat-value stat-value--mono">—</span>
@@ -93,6 +147,12 @@
             <span class="stat-label">Status</span>
             <span id="run-status" class="stat-value stat-status stat-status--neutral">—</span>
           </article>
+          <article class="stat-card stat-card--seed">
+            <span class="stat-label">Seed URL</span>
+            <span id="run-seed-url" class="stat-value stat-value--seed" title="">—</span>
+          </article>
+        </div>
+        <div class="stats-grid stats-grid--metrics">
           <article class="stat-card">
             <span class="stat-label">Queued</span>
             <span id="c-queued" class="stat-value">0</span>
@@ -126,6 +186,10 @@
             <span id="c-failed" class="stat-value">0</span>
           </article>
           <article class="stat-card">
+            <span class="stat-label">Cancelled</span>
+            <span id="c-cancelled" class="stat-value">0</span>
+          </article>
+          <article class="stat-card">
             <span class="stat-label">Discovered</span>
             <span id="c-discovered" class="stat-value">0</span>
           </article>
@@ -134,7 +198,7 @@
           <summary class="run-config-summary">Effective run config</summary>
           <pre id="run-config" class="run-config-pre">{}</pre>
         </details>
-        <p id="poll-status" class="poll-status muted">Polling idle.</p>
+        <p id="poll-status" class="poll-status muted" aria-live="polite"></p>
       </section>
 
       <details class="panel panel--graph graph-panel-details" id="graph-panel-details" open>

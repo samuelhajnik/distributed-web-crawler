@@ -4,29 +4,53 @@ export class CrawlUrlRepository {
   async recoverStaleClaims(crawlRunId: number, staleSeconds: number): Promise<number[]> {
     const stale = await pgPool.query(
       `
-      UPDATE crawl_urls
+      UPDATE crawl_urls u
       SET status = 'QUEUED',
           claimed_at = NULL,
-          claimed_by_worker = NULL
-      WHERE crawl_run_id = $1
-        AND status = 'IN_PROGRESS'
-        AND claimed_at IS NOT NULL
-        AND claimed_at < NOW() - ($2::text || ' seconds')::interval
-      RETURNING id
+          claimed_by_worker = NULL,
+          retry_after_at = NULL
+      FROM crawl_runs r
+      WHERE u.crawl_run_id = $1
+        AND u.crawl_run_id = r.id
+        AND r.status = 'RUNNING'
+        AND u.status = 'IN_PROGRESS'
+        AND u.claimed_at IS NOT NULL
+        AND u.claimed_at < NOW() - ($2::text || ' seconds')::interval
+      RETURNING u.id
     `,
       [crawlRunId, staleSeconds]
     );
     return stale.rows.map((row) => Number(row.id));
   }
 
+  async hasClaimableQueuedUrls(crawlRunId: number): Promise<boolean> {
+    const res = await pgPool.query(
+      `
+      SELECT EXISTS (
+        SELECT 1
+        FROM crawl_urls u
+        INNER JOIN crawl_runs r ON r.id = u.crawl_run_id
+        WHERE u.crawl_run_id = $1
+          AND r.status = 'RUNNING'
+          AND u.status = 'QUEUED'
+          AND (u.retry_after_at IS NULL OR u.retry_after_at <= NOW())
+      ) AS claimable
+      `,
+      [crawlRunId]
+    );
+    return Boolean(res.rows[0]?.claimable);
+  }
+
   async getQueuedUrlIds(crawlRunId: number, limit: number): Promise<number[]> {
     const queuedRes = await pgPool.query(
       `
-      SELECT id
-      FROM crawl_urls
-      WHERE crawl_run_id = $1
-        AND status = 'QUEUED'
-      ORDER BY id
+      SELECT u.id
+      FROM crawl_urls u
+      INNER JOIN crawl_runs r ON r.id = u.crawl_run_id
+      WHERE u.crawl_run_id = $1
+        AND r.status = 'RUNNING'
+        AND u.status = 'QUEUED'
+      ORDER BY u.id
       LIMIT $2
     `,
       [crawlRunId, limit]
@@ -60,6 +84,7 @@ export class CrawlUrlRepository {
         COUNT(*) FILTER (WHERE status = 'NOT_FOUND')::int AS total_not_found,
         COUNT(*) FILTER (WHERE status = 'HTTP_TERMINAL')::int AS total_http_terminal,
         COUNT(*) FILTER (WHERE status = 'FAILED')::int AS total_failed,
+        COUNT(*) FILTER (WHERE status = 'CANCELLED')::int AS total_cancelled,
         COUNT(*) FILTER (WHERE status = 'QUEUED')::int AS total_queued,
         COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS total_in_progress
       FROM crawl_urls

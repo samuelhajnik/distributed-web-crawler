@@ -1,7 +1,9 @@
 import type { FetchClassification } from "@crawler/shared";
 import {
+  buildRetryWakeSignalJob,
   classifyExecutionError,
   classifyHttpResponse,
+  isDuplicateJobIdError,
   mergeRetryAfterWithBackoff,
   parseRetryAfterMs,
   pgPool,
@@ -34,25 +36,39 @@ async function markFailedOrRetry(
       classification.httpStatus === 429
         ? mergeRetryAfterWithBackoff(baseDelay, retryAfterMs, RETRY_MAX_DELAY_MS)
         : baseDelay;
-    await pgPool.query(
+    const requeueRes = await pgPool.query(
       `
-        UPDATE crawl_urls
+        UPDATE crawl_urls u
         SET status = 'QUEUED',
             retry_count = retry_count + 1,
             last_error = $2,
             http_status = $3,
             content_type = $4,
+            retry_after_at = NOW() + ($5::text || ' milliseconds')::interval,
             claimed_at = NULL,
             claimed_by_worker = NULL
-        WHERE id = $1
+        FROM crawl_runs r
+        WHERE u.id = $1
+          AND u.crawl_run_id = r.id
+          AND u.status = 'IN_PROGRESS'
+          AND r.status = 'RUNNING'
+        RETURNING u.id, u.retry_after_at
       `,
-      [urlId, classification.reason, classification.httpStatus, classification.contentType]
+      [urlId, classification.reason, classification.httpStatus, classification.contentType, delay]
     );
-    await crawlJobQueue.add(
-      "crawl-url",
-      { crawlRunId, urlId },
-      { delay, removeOnComplete: 2000, removeOnFail: 2000 }
-    );
+    if (!requeueRes.rowCount) {
+      logW(crawlRunId, urlId, "retry-skip reason=not_in_progress_or_run_not_running");
+      return;
+    }
+    const retryAfterAt = requeueRes.rows[0].retry_after_at as Date;
+    const wakeJob = buildRetryWakeSignalJob(crawlRunId, delay, retryAfterAt);
+    try {
+      await crawlJobQueue.add(wakeJob.name, wakeJob.data, wakeJob.opts);
+    } catch (err) {
+      if (!isDuplicateJobIdError(err)) {
+        throw err;
+      }
+    }
     crawlUrlsRetriedTotal.inc();
     crawlUrlsRequeuedTotal.inc();
     logW(

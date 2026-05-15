@@ -1,21 +1,5 @@
 import { pgPool } from "@crawler/shared";
-import { crawlJobQueue } from "../queue";
-import { crawlUrlsDiscoveredTotal, crawlUrlsRequeuedTotal } from "../prometheus";
-
-export async function markDiscoveredUrlsEnqueued(
-  crawlRunId: number,
-  insertedIds: { id: number }[]
-): Promise<void> {
-  const jobs = insertedIds.map((row) => ({
-    name: "crawl-url",
-    data: { crawlRunId, urlId: Number(row.id) },
-    opts: { removeOnComplete: 2000, removeOnFail: 2000 }
-  }));
-  if (jobs.length > 0) {
-    await crawlJobQueue.addBulk(jobs);
-    crawlUrlsRequeuedTotal.inc(jobs.length);
-  }
-}
+import { crawlUrlsDiscoveredTotal } from "../prometheus";
 
 export async function storeDiscoveredUrls(
   crawlRunId: number,
@@ -45,8 +29,11 @@ export async function storeDiscoveredUrls(
   const insertRes = await pgPool.query(
     `
       INSERT INTO crawl_urls (crawl_run_id, normalized_url, raw_url, discovered_from_url_id, status, depth)
-      SELECT $1, t.norm, t.raw, $3, 'QUEUED', $5
-      FROM UNNEST($2::text[], $4::text[]) AS t(norm, raw)
+      SELECT r.id, t.norm, t.raw, $3, 'QUEUED', $5
+      FROM crawl_runs r
+      CROSS JOIN UNNEST($2::text[], $4::text[]) AS t(norm, raw)
+      WHERE r.id = $1
+        AND r.status = 'RUNNING'
       ON CONFLICT (crawl_run_id, normalized_url) DO NOTHING
       RETURNING id
     `,
@@ -64,6 +51,7 @@ export async function storeDiscoveredUrls(
         UPDATE crawl_runs
         SET duplicates_skipped = duplicates_skipped + $2
         WHERE id = $1
+          AND status = 'RUNNING'
       `,
       [crawlRunId, duplicatesSkipped]
     );

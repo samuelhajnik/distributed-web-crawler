@@ -112,6 +112,48 @@ export function colorsForGraphNode(row, isRoot) {
   };
 }
 
+function buildGraphNodeFromRow(r, graphTheme) {
+  const isRoot = r.discovered_from_url_id == null;
+  const { background, border } = colorsForGraphNode(r, isRoot);
+  return {
+    id: Number(r.id),
+    label: String(r.id),
+    shape: "dot",
+    size: isRoot ? 13 : 9,
+    color: {
+      background,
+      border
+    },
+    font: { color: graphTheme.nodeFont, size: 11 },
+    title: formatNodeInfo(r),
+    meta: r
+  };
+}
+
+/**
+ * Build vis nodes/edges from changed crawl_urls rows (graph delta polling).
+ */
+export function buildLineageGraphItemsFromRows(rows) {
+  const graphTheme = getGraphThemeStyles();
+  const nodes = (rows ?? []).map((r) => buildGraphNodeFromRow(r, graphTheme));
+  const edges = [];
+  for (const r of rows ?? []) {
+    if (r.discovered_from_url_id == null) {
+      continue;
+    }
+    const fromId = Number(r.discovered_from_url_id);
+    const toId = Number(r.id);
+    edges.push({
+      id: `${fromId}->${toId}`,
+      from: fromId,
+      to: toId,
+      arrows: "to",
+      color: { color: graphTheme.edge }
+    });
+  }
+  return { nodes, edges };
+}
+
 /**
  * Build graph nodes/edges from /urls + /graph payloads.
  * Keeps transport and rendering separated so polling can be replaced by SSE later.
@@ -122,23 +164,7 @@ export function buildLineageGraph(urlsPayload, graphPayload) {
   const nodeMeta = new Map(rows.map((r) => [Number(r.id), r]));
   const graphTheme = getGraphThemeStyles();
 
-  const nodes = rows.map((r) => {
-    const isRoot = r.discovered_from_url_id == null;
-    const { background, border } = colorsForGraphNode(r, isRoot);
-    return {
-      id: Number(r.id),
-      label: String(r.id),
-      shape: "dot",
-      size: isRoot ? 13 : 9,
-      color: {
-        background,
-        border
-      },
-      font: { color: graphTheme.nodeFont, size: 11 },
-      title: formatNodeInfo(r),
-      meta: r
-    };
-  });
+  const nodes = rows.map((r) => buildGraphNodeFromRow(r, graphTheme));
 
   const edges = edgesRaw.map((e) => ({
     id: `${e.from_url_id}->${e.to_url_id}`,

@@ -112,6 +112,41 @@ export function registerCrawlRunRoutes(app: Express, crawlRunService: CrawlRunSe
     }
   });
 
+  app.get("/crawl-runs/:id/graph-delta", async (req, res) => {
+    try {
+      const crawlRunId = Number(req.params.id);
+      if (Number.isNaN(crawlRunId)) {
+        res.status(400).json({ error: "Invalid run id" });
+        return;
+      }
+
+      const limitRaw = Number(req.query.limit ?? 5000);
+      const limit = Number.isNaN(limitRaw)
+        ? 5000
+        : Math.min(20_000, Math.max(1, Math.floor(limitRaw)));
+
+      let afterVersion = 0;
+      const afterVersionRaw = req.query.after_version;
+      if (
+        afterVersionRaw !== undefined &&
+        afterVersionRaw !== null &&
+        String(afterVersionRaw).trim() !== ""
+      ) {
+        const parsed = Number(afterVersionRaw);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          res.status(400).json({ error: "Invalid after_version" });
+          return;
+        }
+        afterVersion = Math.floor(parsed);
+      }
+
+      const result = await crawlRunService.getRunGraphDelta(crawlRunId, afterVersion, limit);
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   app.get("/crawl-runs/:id", async (req, res) => {
     try {
       const crawlRunId = Number(req.params.id);

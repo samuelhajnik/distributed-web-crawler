@@ -1,13 +1,18 @@
 import {
   cancelCrawlRun,
   getGraph,
+  getGraphDelta,
   getSummary,
   getSummaryIfExists,
   getUrls,
   listCrawlRuns,
   startCrawl
 } from "./api.js";
-import { buildLineageGraph, formatNodeInfo } from "./graph-model.js";
+import {
+  buildLineageGraph,
+  buildLineageGraphItemsFromRows,
+  formatNodeInfo
+} from "./graph-model.js";
 import { createLineageGraphView } from "./graph-view.js";
 import { createRunPoller } from "./poller.js";
 
@@ -77,6 +82,14 @@ let urlsTableOffset = 0;
 const URL_TABLE_LIMIT = 200;
 /** Rows/edges fetched for lineage graph construction (aligned with GET /graph limit). */
 const GRAPH_URL_LIMIT = 50000;
+/** Max changed URL rows per graph-delta page during normal graph polling. */
+const GRAPH_DELTA_LIMIT = 5000;
+
+/** Monotonic cursor for graph delta polling (`graph_version`). */
+let graphWatermark = { graph_version: 0 };
+let graphInitialized = false;
+/** Incremented on run switch to ignore stale graph-delta responses. */
+let graphRequestSeq = 0;
 
 let lastRenderedGraphNodeCount = 0;
 let lastRenderedGraphEdgeCount = 0;
@@ -114,12 +127,7 @@ function refreshGraphColorsForTheme() {
   if (!activeRunId || !el.graphPanelDetails.open) {
     return;
   }
-  void fetchGraphSnapshot(activeRunId).then((snap) => {
-    if (!snap.urls?.urls?.length) {
-      return;
-    }
-    renderGraph(snap, { forceRefresh: true, suppressAutoFit: true });
-  });
+  void initializeGraphFromSnapshot(activeRunId, { forceRefresh: true, suppressAutoFit: true });
 }
 
 function applyTheme(theme, options = {}) {
@@ -537,6 +545,17 @@ function startHistoryRefreshLoop() {
   }, HISTORY_REFRESH_MS);
 }
 
+function computeWatermarkFromRows(rows) {
+  let maxVersion = 0;
+  for (const row of rows) {
+    const version = Number(row.graph_version);
+    if (Number.isFinite(version) && version > maxVersion) {
+      maxVersion = version;
+    }
+  }
+  return { graph_version: maxVersion };
+}
+
 function resetRunUiForActivation() {
   graphRunTerminal = false;
   graphTerminalFinalized = false;
@@ -544,6 +563,9 @@ function resetRunUiForActivation() {
   graphTerminalFinalizationSeq = 0;
   clearScheduledTerminalVisibleFinalization();
   graphPausedForHiddenTab = false;
+  graphRequestSeq += 1;
+  graphWatermark = { graph_version: 0 };
+  graphInitialized = false;
   lastGraphSignature = null;
   lastRenderedGraphNodeCount = 0;
   lastRenderedGraphEdgeCount = 0;
@@ -593,8 +615,7 @@ async function refreshActiveRunViews(runId = activeRunId, options = {}) {
   const mainSnap = await fetchMainSnapshot(runId);
   await applyMainSnapshot(mainSnap);
   if (!graphRunTerminal) {
-    const graphSnap = await fetchGraphSnapshot(runId);
-    renderGraph(graphSnap, { forceFit: fitGraph });
+    await initializeGraphFromSnapshot(runId, { forceFit: fitGraph });
   }
 }
 
@@ -854,8 +875,10 @@ async function resumeGraphAfterHiddenTab() {
     return;
   }
   try {
-    const snap = await fetchGraphSnapshot(activeRunId);
-    forceGraphRefresh(snap, { suppressAutoFit: true });
+    await initializeGraphFromSnapshot(activeRunId, {
+      forceRefresh: true,
+      suppressAutoFit: true
+    });
     graphView.resumeAfterHiddenTab();
   } finally {
     graphPoller.start(activeRunId);
@@ -895,11 +918,100 @@ async function fetchGraphSnapshot(crawlRunId) {
   return { urls, graph: graphRes.graph, graphError: graphRes.graphError };
 }
 
+async function initializeGraphFromSnapshot(crawlRunId, options = {}) {
+  const snap = await fetchGraphSnapshot(crawlRunId);
+  renderGraph(snap, options);
+  graphWatermark = computeWatermarkFromRows(snap.urls?.urls ?? []);
+  graphInitialized = true;
+}
+
+async function fetchGraphDeltaPages(crawlRunId, afterVersion, requestSeq) {
+  const collected = [];
+  let cursorVersion = Math.max(0, Math.floor(Number(afterVersion ?? 0)));
+  let totals = null;
+  let watermark = { graph_version: cursorVersion };
+  for (;;) {
+    if (requestSeq !== graphRequestSeq) {
+      return null;
+    }
+    const page = await getGraphDelta(
+      crawlRunId,
+      { graph_version: cursorVersion },
+      GRAPH_DELTA_LIMIT
+    );
+    if (requestSeq !== graphRequestSeq) {
+      return null;
+    }
+    collected.push(...(page.urls ?? []));
+    totals = page.totals ?? totals;
+    if (page.watermark) {
+      watermark = page.watermark;
+      cursorVersion = Number(page.watermark.graph_version);
+    }
+    if (!page.pagination?.has_more) {
+      return { urls: collected, watermark, totals };
+    }
+  }
+}
+
+async function pollGraphDelta(crawlRunId) {
+  const runIdAtStart = crawlRunId;
+  const requestSeqAtStart = graphRequestSeq;
+  if (!activeRunId || activeRunId !== runIdAtStart || !el.graphPanelDetails.open) {
+    return;
+  }
+  if (!graphInitialized) {
+    await initializeGraphFromSnapshot(runIdAtStart);
+    if (requestSeqAtStart !== graphRequestSeq || activeRunId !== runIdAtStart) {
+      return;
+    }
+    return;
+  }
+
+  const result = await fetchGraphDeltaPages(
+    runIdAtStart,
+    graphWatermark.graph_version,
+    requestSeqAtStart
+  );
+  if (!result || requestSeqAtStart !== graphRequestSeq || activeRunId !== runIdAtStart) {
+    return;
+  }
+
+  const { urls, watermark, totals } = result;
+
+  if (totals) {
+    el.graphMeta.textContent = `${Number(totals.nodes).toLocaleString()} nodes · ${Number(totals.edges).toLocaleString()} edges`;
+  }
+
+  if (!urls.length) {
+    graphWatermark = watermark;
+    return;
+  }
+
+  const items = buildLineageGraphItemsFromRows(urls);
+  const prevNodes = lastRenderedGraphNodeCount;
+  const prevEdges = lastRenderedGraphEdgeCount;
+  const counts = graphView.applyDelta(items);
+  if (requestSeqAtStart !== graphRequestSeq || activeRunId !== runIdAtStart) {
+    return;
+  }
+
+  graphWatermark = watermark;
+  const grew = counts.nodeCount > prevNodes || counts.edgeCount > prevEdges;
+  lastRenderedGraphNodeCount = counts.nodeCount;
+  lastRenderedGraphEdgeCount = counts.edgeCount;
+
+  if (!graphRunTerminal && graphView.isAutoZoomEnabled() && grew) {
+    graphView.fitSoon({ delayMs: 350 });
+  }
+}
+
 const graphPoller = createRunPoller(
-  fetchGraphSnapshot,
-  (snap) => {
-    renderGraph(snap);
+  async (crawlRunId) => {
+    await pollGraphDelta(crawlRunId);
+    return {};
   },
+  () => {},
   (err) => {
     el.graphWarn.textContent = `Graph poll failed: ${err?.message ?? String(err)}`;
   },

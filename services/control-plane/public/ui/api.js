@@ -53,3 +53,12 @@ export async function getGraph(crawlRunId, limit = 50000) {
   const resp = await fetch(`/crawl-runs/${crawlRunId}/graph?limit=${limit}`);
   return readJsonOrThrow(resp, "graph");
 }
+
+export async function getGraphDelta(crawlRunId, watermark, limit = 5000) {
+  const afterVersion = Math.max(0, Math.floor(Number(watermark?.graph_version ?? 0)));
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("after_version", String(afterVersion));
+  const resp = await fetch(`/crawl-runs/${crawlRunId}/graph-delta?${params.toString()}`);
+  return readJsonOrThrow(resp, "graph delta");
+}

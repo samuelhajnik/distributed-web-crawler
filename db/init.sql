@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
   completed_at TIMESTAMPTZ
 );
 
+CREATE SEQUENCE IF NOT EXISTS crawl_url_graph_version_seq;
+
 CREATE TABLE IF NOT EXISTS crawl_urls (
   id BIGSERIAL PRIMARY KEY,
   crawl_run_id BIGINT NOT NULL REFERENCES crawl_runs(id) ON DELETE CASCADE,
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS crawl_urls (
   final_in_scope BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  graph_version BIGINT NOT NULL DEFAULT nextval('crawl_url_graph_version_seq'),
   UNIQUE (crawl_run_id, normalized_url)
 );
 
@@ -64,17 +67,21 @@ CREATE INDEX IF NOT EXISTS idx_crawl_urls_claimed_at
 CREATE INDEX IF NOT EXISTS idx_crawl_urls_discovered_from
   ON crawl_urls(discovered_from_url_id);
 
-CREATE OR REPLACE FUNCTION set_updated_at()
+CREATE INDEX IF NOT EXISTS idx_crawl_urls_graph_version
+  ON crawl_urls(crawl_run_id, graph_version);
+
+CREATE OR REPLACE FUNCTION set_crawl_url_update_metadata()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = NOW();
+  NEW.graph_version = nextval('crawl_url_graph_version_seq');
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_crawl_urls_updated_at ON crawl_urls;
 
-CREATE TRIGGER trg_crawl_urls_updated_at
-BEFORE UPDATE ON crawl_urls
+CREATE TRIGGER trg_crawl_urls_update_metadata
+BEFORE INSERT OR UPDATE ON crawl_urls
 FOR EACH ROW
-EXECUTE PROCEDURE set_updated_at();
+EXECUTE PROCEDURE set_crawl_url_update_metadata();

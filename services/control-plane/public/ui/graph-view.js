@@ -302,6 +302,23 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
     };
   }
 
+  /**
+   * Merge changed nodes/edges into existing DataSets (delta polling).
+   * Does not clear or recreate the Network instance.
+   */
+  function applyDelta({ nodes = [], edges = [] }) {
+    if (nodes.length) {
+      data.nodes.update(nodes);
+    }
+    if (edges.length) {
+      data.edges.update(edges);
+    }
+    if (!completedMode && (nodes.length || edges.length)) {
+      network.startSimulation();
+    }
+    return getCounts();
+  }
+
   function clear(message) {
     clearPendingTimers();
     finalizationSeq += 1;
@@ -625,6 +642,7 @@ export function createLineageGraphView(containerEl, infoEl, hooks = {}) {
 
   return {
     render,
+    applyDelta,
     clear,
     fit,
     fitSoon,

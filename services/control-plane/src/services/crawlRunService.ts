@@ -274,6 +274,56 @@ export class CrawlRunService {
     };
   }
 
+  async getRunGraphDelta(
+    crawlRunId: number,
+    afterVersion: number,
+    limit: number
+  ): Promise<{ status: number; body: unknown }> {
+    const run = await this.crawlRunRepository.getById(crawlRunId);
+    if (!run) {
+      return { status: 404, body: { error: "Run not found" } };
+    }
+
+    const rows = await this.crawlUrlRepository.getGraphDeltaRows(crawlRunId, afterVersion, limit);
+    const nodeCount = await this.crawlUrlRepository.getNodeCount(crawlRunId);
+    const edgeCount = await this.crawlUrlRepository.getEdgeCount(crawlRunId);
+
+    const edges = rows
+      .filter((row) => row.discovered_from_url_id != null)
+      .map((row) => ({
+        from_url_id: row.discovered_from_url_id,
+        to_url_id: row.id,
+        from_normalized_url: null,
+        to_normalized_url: row.normalized_url,
+        to_raw_url: row.raw_url ?? null
+      }));
+
+    let watermark: { graph_version: number } = { graph_version: afterVersion };
+    if (rows.length > 0) {
+      const last = rows[rows.length - 1];
+      watermark = { graph_version: Number(last.graph_version) };
+    }
+
+    return {
+      status: 200,
+      body: {
+        crawl_run_id: crawlRunId,
+        urls: rows,
+        edges,
+        pagination: {
+          limit,
+          returned: rows.length,
+          has_more: rows.length === limit
+        },
+        watermark,
+        totals: {
+          nodes: nodeCount,
+          edges: edgeCount
+        }
+      }
+    };
+  }
+
   async getRun(crawlRunId: number): Promise<{ status: number; body: unknown }> {
     const run = await this.crawlRunRepository.getById(crawlRunId);
     if (!run) {

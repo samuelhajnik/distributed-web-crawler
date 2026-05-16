@@ -154,6 +154,53 @@ export class CrawlUrlRepository {
     return Number(nodeCount.rows[0].c);
   }
 
+  async getEdgeCount(crawlRunId: number): Promise<number> {
+    const edgeCount = await pgPool.query(
+      `
+      SELECT COUNT(*)::int AS c
+      FROM crawl_urls
+      WHERE crawl_run_id = $1
+        AND discovered_from_url_id IS NOT NULL
+      `,
+      [crawlRunId]
+    );
+    return Number(edgeCount.rows[0].c);
+  }
+
+  async getGraphDeltaRows(
+    crawlRunId: number,
+    afterVersion: number,
+    limit: number
+  ): Promise<Record<string, unknown>[]> {
+    const rows = await pgPool.query(
+      `
+      SELECT
+        id,
+        normalized_url,
+        raw_url,
+        discovered_from_url_id,
+        depth,
+        status,
+        retry_count,
+        http_status,
+        last_error,
+        updated_at,
+        graph_version,
+        requested_url,
+        final_url,
+        redirected,
+        final_in_scope
+      FROM crawl_urls
+      WHERE crawl_run_id = $1
+        AND graph_version > $2
+      ORDER BY graph_version ASC
+      LIMIT $3
+      `,
+      [crawlRunId, afterVersion, limit]
+    );
+    return rows.rows as Record<string, unknown>[];
+  }
+
   async getUrlsPage(
     crawlRunId: number,
     status: string | null,
@@ -190,6 +237,7 @@ export class CrawlUrlRepository {
         visited_at,
         last_error,
         updated_at,
+        graph_version,
         requested_url,
         final_url,
         redirected,

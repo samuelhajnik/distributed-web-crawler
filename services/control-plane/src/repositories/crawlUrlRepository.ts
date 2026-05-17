@@ -41,23 +41,6 @@ export class CrawlUrlRepository {
     return Boolean(res.rows[0]?.claimable);
   }
 
-  async getQueuedUrlIds(crawlRunId: number, limit: number): Promise<number[]> {
-    const queuedRes = await pgPool.query(
-      `
-      SELECT u.id
-      FROM crawl_urls u
-      INNER JOIN crawl_runs r ON r.id = u.crawl_run_id
-      WHERE u.crawl_run_id = $1
-        AND r.status = 'RUNNING'
-        AND u.status = 'QUEUED'
-      ORDER BY u.id
-      LIMIT $2
-    `,
-      [crawlRunId, limit]
-    );
-    return queuedRes.rows.map((row) => Number(row.id));
-  }
-
   async getRunningGauges(): Promise<{ queued: number; in_progress: number; failed: number }> {
     const res = await pgPool.query(`
     SELECT

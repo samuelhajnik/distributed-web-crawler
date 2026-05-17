@@ -410,13 +410,13 @@ export class CrawlRunService {
     }
     crawlQueueReconciliationCyclesTotal.inc();
     const recovered = await this.requeueStaleClaims(crawlRunId);
-    const reconciled = await this.reconcileQueuedRows(crawlRunId);
+    const signalsToppedUp = await this.topUpSignalsIfClaimable(crawlRunId);
     const counts = await this.crawlRunRepository.getRunCounts(crawlRunId);
     await this.finalizeRunIfStableAndComplete(crawlRunId, counts);
     await this.updateRunningRunGauges();
     logCp(
       crawlRunId,
-      `maintenance recovered_stale=${recovered} reconciled_queued=${reconciled} queued=${counts.queued_count} in_progress=${counts.in_progress_count}`
+      `maintenance recovered_stale=${recovered} signals_topped_up=${signalsToppedUp} queued=${counts.queued_count} in_progress=${counts.in_progress_count}`
     );
     return counts;
   }
@@ -493,18 +493,18 @@ export class CrawlRunService {
     return n;
   }
 
-  private async reconcileQueuedRows(crawlRunId: number): Promise<number> {
+  private async topUpSignalsIfClaimable(crawlRunId: number): Promise<number> {
     const hasClaimable = await this.crawlUrlRepository.hasClaimableQueuedUrls(crawlRunId);
-    if (hasClaimable) {
-      const signals = await topUpRunSignals(this.queue, crawlRunId);
-      if (signals > 0) {
-        crawlQueueReconciliationEnqueuedTotal.inc(signals);
-        crawlUrlsRequeuedTotal.inc(signals);
-        logCp(crawlRunId, `reconciliation run-signals-topped-up=${signals}`);
-      }
-      return 1;
+    if (!hasClaimable) {
+      return 0;
     }
-    return 0;
+    const signals = await topUpRunSignals(this.queue, crawlRunId);
+    if (signals > 0) {
+      crawlQueueReconciliationEnqueuedTotal.inc(signals);
+      crawlUrlsRequeuedTotal.inc(signals);
+      logCp(crawlRunId, `reconciliation run-signals-topped-up=${signals}`);
+    }
+    return signals;
   }
 
   private async updateRunningRunGauges(): Promise<void> {

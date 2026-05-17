@@ -20,7 +20,7 @@ export type UrlStatus =
   | "CANCELLED";
 export type RunStatus = "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
-export type { CrawlJobPayload, LegacyCrawlJobPayload } from "./types";
+export type { CrawlJobPayload } from "./types";
 
 const POSTGRES_HOST = process.env.POSTGRES_HOST ?? "localhost";
 const POSTGRES_PORT = Number(process.env.POSTGRES_PORT ?? 5432);
@@ -34,7 +34,6 @@ export const MAX_RETRIES = Number(process.env.MAX_RETRIES ?? 2);
 // Seconds: lease expiry for IN_PROGRESS rows (demo default is aggressive so stuck work is reclaimed quickly).
 export const CLAIM_STALE_SECONDS = Number(process.env.CLAIM_STALE_SECONDS ?? 10);
 export const RECONCILE_INTERVAL_SECONDS = Number(process.env.RECONCILE_INTERVAL_SECONDS ?? 10);
-export const RECONCILE_BATCH_SIZE = Number(process.env.RECONCILE_BATCH_SIZE ?? 500);
 export const RETRY_BASE_DELAY_MS = Number(process.env.RETRY_BASE_DELAY_MS ?? 1000);
 export const RETRY_MAX_DELAY_MS = Number(process.env.RETRY_MAX_DELAY_MS ?? 30000);
 export const CRAWL_QUEUE_NAME = "crawl-queue";

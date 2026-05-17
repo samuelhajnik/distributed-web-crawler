@@ -32,7 +32,7 @@ Prometheus (Compose): **http://localhost:9090** — verify **Targets** are healt
 
 **Control plane**
 
-- **`crawl_reconciliation_cycle_duration_seconds`** — wall time for one full maintenance sweep across all RUNNING runs. Spikes when Postgres is slow, many runs are active, or reconciliation batch sizes are large.
+- **`crawl_reconciliation_cycle_duration_seconds`** — wall time for one full maintenance sweep across all RUNNING runs. Spikes when Postgres is slow, many RUNNING runs require maintenance in the same sweep, or maintenance work per sweep grows with active runs.
 
 ## Detecting common failure modes
 

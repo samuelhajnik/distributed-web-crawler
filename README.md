@@ -429,7 +429,7 @@ npm run dev:control-plane
 npm run dev:worker
 ```
 
-Worker metrics server listens on `WORKER_METRICS_PORT` (default `9091`). Parallel BullMQ jobs, outbound HTTP caps, per-host pacing, and optional host cooldown use `WORKER_CONCURRENCY` / `FETCH_CONCURRENCY` / `FETCH_CONCURRENCY_PER_HOST` / `FETCH_MIN_GAP_PER_HOST_MS` / `FETCH_GAP_JITTER_MS` / `FETCH_HOST_COOLDOWN_*` — see **Fetch concurrency / politeness** for defaults (override via env before `npm run dev:worker`).
+Worker metrics server listens on `WORKER_METRICS_PORT` (default `9091`). Concurrent run-signal handlers, outbound HTTP caps, per-host pacing, and optional host cooldown use `WORKER_CONCURRENCY` / `FETCH_CONCURRENCY` / `FETCH_CONCURRENCY_PER_HOST` / `FETCH_MIN_GAP_PER_HOST_MS` / `FETCH_GAP_JITTER_MS` / `FETCH_HOST_COOLDOWN_*` — see **Fetch concurrency / politeness** for defaults (override via env before `npm run dev:worker`).
 
 ## Fetch concurrency / politeness (lightweight)
 

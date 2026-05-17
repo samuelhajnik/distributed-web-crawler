@@ -4,7 +4,6 @@ import {
   classifyExecutionError,
   classifyHttpResponse,
   type CrawlJobPayload,
-  type LegacyCrawlJobPayload,
   topUpRunSignals
 } from "@crawler/shared";
 import { buildRequestHeaders, logW } from "../config";
@@ -44,15 +43,9 @@ type FetchResult = {
 };
 
 export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> {
-  const payload = job.data;
-  if (isLegacyUrlJobPayload(payload)) {
-    logW(payload.crawlRunId, 0, "skip-legacy-url-job");
-    return;
-  }
-
   observeQueueLatency(job);
 
-  const claimed = await claimNextQueuedUrl(payload.crawlRunId);
+  const claimed = await claimNextQueuedUrl(job.data.crawlRunId);
   if (!claimed) {
     return;
   }
@@ -64,10 +57,6 @@ export async function processCrawlJob(job: Job<CrawlJobPayload>): Promise<void> 
     processingTimer();
     processedUrlsTotal.inc();
   }
-}
-
-function isLegacyUrlJobPayload(payload: CrawlJobPayload | LegacyCrawlJobPayload): boolean {
-  return "urlId" in payload && typeof (payload as LegacyCrawlJobPayload).urlId === "number";
 }
 
 function observeQueueLatency(job: Job<CrawlJobPayload>): void {

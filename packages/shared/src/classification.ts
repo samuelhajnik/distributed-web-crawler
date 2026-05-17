@@ -12,7 +12,7 @@ export type FetchClassification = {
  *
  * **408**, **421**, **425**, **429**: `retryable: true`; URL-level retries apply until **`maxRetries`**
  * is exhausted, then terminal **`HTTP_TERMINAL`** with the same HTTP status. The worker may honor
- * **`Retry-After`** for BullMQ delay when valid (**429** only); otherwise normal backoff applies.
+ * **`Retry-After`** for retry delay / delayed wake signal when valid (**429** only); otherwise normal backoff applies.
  * Host cooldown may still apply after a **429** response.
  *
  * **5xx**: `retryable: true` until URL-level retries are exhausted, then terminal `HTTP_TERMINAL`.

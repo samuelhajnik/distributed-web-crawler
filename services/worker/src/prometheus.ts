@@ -14,14 +14,14 @@ export const crawlFetchDurationSeconds = new client.Histogram({
 
 export const crawlProcessingDurationSeconds = new client.Histogram({
   name: "crawl_processing_duration_seconds",
-  help: "End-to-end worker handling for one claimed URL task (after successful claim)",
+  help: "End-to-end worker handling for one claimed URL row (after successful Postgres claim)",
   buckets: secondsBuckets,
   registers: [register]
 });
 
 export const crawlQueueLatencySeconds = new client.Histogram({
   name: "crawl_queue_latency_seconds",
-  help: "Time from BullMQ job creation timestamp until worker starts processing the job",
+  help: "Time from run-level dispatch signal creation timestamp until worker starts processing it",
   buckets: secondsBuckets,
   registers: [register]
 });
@@ -52,14 +52,14 @@ export const crawlUrlsRetriedTotal = new client.Counter({
 
 export const crawlUrlsRequeuedTotal = new client.Counter({
   name: "crawl_urls_requeued_total",
-  help: "BullMQ jobs scheduled (includes discovery enqueue)",
+  help: "Run-level retry/wake signals scheduled after URL retry transitions",
   registers: [register]
 });
 
-/** Increments once per URL task that was successfully claimed (terminal outcome or retry path). */
+/** Increments once per claimed URL processing attempt completed after a successful Postgres claim. */
 export const processedUrlsTotal = new client.Counter({
   name: "processed_urls_total",
-  help: "URL tasks completed after a successful atomic claim (one increment per claimed job handling)",
+  help: "Claimed URL processing attempts completed after a successful Postgres claim",
   registers: [register]
 });
 

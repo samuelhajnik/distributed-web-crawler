@@ -38,13 +38,13 @@ export const crawlQueueReconciliationCyclesTotal = new client.Counter({
 
 export const crawlQueueReconciliationEnqueuedTotal = new client.Counter({
   name: "crawl_queue_reconciliation_enqueued_total",
-  help: "Jobs enqueued from reconciliation (QUEUED rows re-published)",
+  help: "Bounded run-level dispatch signals added or replenished during reconciliation",
   registers: [register]
 });
 
 export const crawlUrlsRequeuedTotal = new client.Counter({
   name: "crawl_urls_requeued_total",
-  help: "Jobs enqueued from control-plane (stale recovery + reconciliation + initial seed)",
+  help: "Run-level dispatch signals topped up from control-plane paths (seed, stale recovery, reconciliation)",
   registers: [register]
 });
 

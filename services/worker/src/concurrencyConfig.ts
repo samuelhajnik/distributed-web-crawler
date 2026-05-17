@@ -12,7 +12,7 @@
  * FETCH_HOST_COOLDOWN_BASE_MS, FETCH_HOST_COOLDOWN_MAX_MS.
  */
 export const DEFAULT_WORKER_CONCURRENCY = 8;
-/** In-process cap on concurrent HTTP attempts across active BullMQ jobs. */
+/** In-process cap on concurrent HTTP attempts across active run-signal handlers. */
 export const DEFAULT_FETCH_CONCURRENCY = 12;
 /** Concurrent fetches to the same hostname from this process (Origin politeness). */
 export const DEFAULT_FETCH_PER_HOST_CONCURRENCY = 4;

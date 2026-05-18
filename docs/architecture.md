@@ -29,7 +29,7 @@ flowchart LR
 
 ## URL state machine
 
-Rows move between non-terminal and terminal **`crawl_urls.status`** values under atomic updates and run-scope guards. **`CANCELLED`** is a terminal URL status used when the crawl run is cancelled.
+Rows move from active frontier states into completed row states under atomic updates and run-scope guards. **`CANCELLED`** is a completed URL status used when the crawl run is cancelled.
 
 ```mermaid
 stateDiagram-v2
@@ -48,7 +48,9 @@ stateDiagram-v2
   IN_PROGRESS --> CANCELLED: run cancelled
 ```
 
-Non-terminal work for completion counting is primarily **`QUEUED`** and **`IN_PROGRESS`**. Run **`COMPLETED`** follows a stable-empty frontier check on those counts (see README).
+**Note on completed URL states:** In this state machine, a completed or “terminal” state means the current `crawl_urls` row is finished and will not be claimed again. It does not always mean discovery stopped at that point. For example, `REDIRECT_FOLLOWED` is completed for the originally claimed row, but the worker may already have followed the redirect, processed the final in-scope response, and inserted discovered child URLs before finalizing that row. By contrast, statuses such as `REDIRECT_OUT_OF_SCOPE`, `REDIRECT_301`, `FORBIDDEN`, `NOT_FOUND`, `HTTP_TERMINAL`, `FAILED`, and `CANCELLED` stop expansion for that row.
+
+Active frontier work for run completion counting is primarily **`QUEUED`** and **`IN_PROGRESS`**. Run **`COMPLETED`** follows a stable-empty frontier check on those counts (see README).
 
 ## Crawl scope
 

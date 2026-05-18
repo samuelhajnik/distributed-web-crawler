@@ -69,7 +69,7 @@ Under the **documented normalization and per-run host scope** (derived from the 
 - **Durable discovery:** discovered URLs are stored in Postgres once inserted, and reconciliation plus lease recovery keep claimable work from being permanently stranded.
 - **Single-row ownership:** duplicate discoveries are deduplicated at insert time, and atomic claiming ensures only one worker processes a URL row at a time.
 - **Deterministic comparison path:** multi-worker execution converges to the same normalized URL set as single-worker execution under the same normalization and host-scope rules.
-- **Terminal frontier semantics:** under bounded retries and stable dependencies, frontier rows transition to terminal URL statuses (including `VISITED`, redirect/outcome terminals, `HTTP_TERMINAL`, `FAILED`, or **`CANCELLED`** after cancellation), allowing the run to reach a terminal run status when active work is stably drained.
+- **Completed frontier semantics:** under bounded retries and stable dependencies, active frontier rows (`QUEUED`, `IN_PROGRESS`) transition into completed row states such as `VISITED`, `REDIRECT_FOLLOWED`, non-expanding redirect/HTTP outcomes, `FAILED`, or **`CANCELLED`** after cancellation. This allows the run to reach a terminal run status when active work is stably drained.
 
 Reviewers can verify these properties using the export/summary APIs, the E2E fixture tests, and the comparison workflow (`npm run compare-results`).
 
